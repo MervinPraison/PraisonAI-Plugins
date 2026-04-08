@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonai-plugins"
-version = "0.0.1"
+version = "0.0.2"
 description = "Protocol-driven plugins for PraisonAI Agents"
 authors = [
     {name = "Mervin Praison"},
@@ -18,6 +18,11 @@ dependencies = [
 [project.entry-points."praisonai.plugins"]
 simple_logger = "praisonai_plugins.hooks.simple_logger:SimpleLoggerPlugin"
 custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugin"
+basic_tools = "praisonai_plugins.tools.basic_tool:BasicToolPlugin"
+strict_policy = "praisonai_plugins.policies.strict_policy:StrictTypingPolicyPlugin"
+pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
+researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlugin"
+slack_integration = "praisonai_plugins.integrations.slack_integration:SlackIntegrationPlugin"
 
 [tool.setuptools.packages.find]
 where = ["."]
