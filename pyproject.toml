@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "praisonai-plugins"
+version = "0.0.1"
+description = "Protocol-driven plugins for PraisonAI Agents"
+authors = [
+    {name = "Mervin Praison"},
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "praisonaiagents>=0.1.0",
+]
+
+[project.entry-points."praisonai.plugins"]
+simple_logger = "praisonai_plugins.hooks.simple_logger:SimpleLoggerPlugin"
+custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugin"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_plugins", "praisonai_plugins.*"]
