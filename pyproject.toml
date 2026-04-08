@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonai-plugins"
-version = "0.0.2"
+version = "0.0.4"
 description = "Protocol-driven plugins for PraisonAI Agents"
 authors = [
     {name = "Mervin Praison"},
@@ -25,5 +25,5 @@ researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlu
 slack_integration = "praisonai_plugins.integrations.slack_integration:SlackIntegrationPlugin"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["praisonai_plugins", "praisonai_plugins.*"]
