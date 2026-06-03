@@ -164,67 +164,41 @@ jobs:
           label_trigger: "claude"
 
           direct_prompt: |
-            You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
+            You are implementing changes in MervinPraison/PraisonAI-Plugins (lifecycle plugins for PraisonAI). Follow README.md and patterns under `src/praisonai_plugins/`.
 
-            STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):
+            Primary scope: `src/praisonai_plugins/`, `tests/`. Depends on `praisonaiagents` only — do not vendor core SDK here.
+
+            STEP 0 — SETUP GIT IDENTITY & AUTH:
             git config --global user.name "MervinPraison"
             git config --global user.email "454862+MervinPraison@users.noreply.github.com"
             gh auth setup-git
 
-
             STEP 1 — READ GUIDELINES:
-            Read AGENTS.md to understand the architecture rules.
+            Read README.md. Register plugins via `[project.entry-points."praisonai.plugins"]` in `pyproject.toml`.
 
-            STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
-            Before implementing anything, answer these questions:
-            - CORE vs WRAPPER vs TOOLS vs DOCS vs PLUGINS ROUTING:
-              1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
-              2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-              3. Tools (PraisonAI-Tools): Capabilities Agents actively call during execution (e.g. SurrealDB tool, Slack tool).
-              4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
-              5. Plugins (PraisonAI-Plugins): Framework lifecycle extensions replacing systemic behavior (e.g. tracing, logging, metrics, hooks, guardrails).
-              For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
-            - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
-            - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
-            - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
-            - Will agent.py grow larger? If the change adds >50 lines to agent.py, find a way to extract instead.
-            - Is there a name collision with existing exports in __init__.py?
-            If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
+            STEP 2 — LAYER VALIDATION (mandatory before coding):
+            This repo IS the **Plugins** layer (`praisonai-plugins`). Lifecycle extensions belong here.
+            - **Implement here:** hooks, guardrails, policies, skills, tracing/logging providers, `praisonai.plugins` entry points
+            - **Route to PraisonAI (core):** new PluginManager APIs, hook events, protocols → MervinPraison/PraisonAI
+            - **Route to PraisonAI (wrapper):** CLI plugin commands → MervinPraison/PraisonAI
+            - **Route to PraisonAI-Tools:** agent-callable API tools (Slack post, GitHub PR, etc.) → MervinPraison/PraisonAI-Tools
+            - **Reject:** agent-callable tools implemented as plugins; heavy third-party SDKs without lazy imports
+            If the issue belongs in another layer, explain why and do not implement here.
 
-            STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):
-            - Create a fix branch and implement a minimal, focused fix
-            - Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper
-            - Keep changes small and backward-compatible
-
-            STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
-            When work must happen in a different repository, follow these steps EXACTLY. Do NOT attempt to use `cd`, as directory state is not preserved. Use `git -C` for all commands.
-            a) Clone the repository:
-               gh repo clone MervinPraison/<REPO_NAME> /tmp/<REPO_NAME>
-            b) Copy GitHub authentication from the main repository so push works seamlessly:
-               git -C /tmp/<REPO_NAME> config http."https://github.com/".extraheader "$(git config --get http."https://github.com/".extraheader)"
-            c) Create a feature branch (NEVER commit to main):
-               git -C /tmp/<REPO_NAME> checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
-            d) Make your changes using absolute paths (e.g. edit /tmp/<REPO_NAME>/docs.json)
-            e) Commit:
-               git -C /tmp/<REPO_NAME> add -A
-               git -C /tmp/<REPO_NAME> commit -m "feat: <description> (fixes #$ISSUE_NUMBER)"
-            f) Push the branch:
-               git -C /tmp/<REPO_NAME> push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
-            g) Create PR in the EXTERNAL repo:
-               gh pr create -R MervinPraison/<REPO_NAME> --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d) --title "feat: <title>" --body "Fixes MervinPraison/PraisonAI#$ISSUE_NUMBER
-
-               <body>"
+            STEP 3 — IMPLEMENT (in this repo):
+            BRANCH="claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)"
+            git checkout -b "$BRANCH"
+            Implement minimal, focused changes. Lazy-import optional deps inside hook methods.
 
             STEP 4 — TEST:
-            - For SDK changes: cd src/praisonai-agents && PYTHONPATH=. python -m pytest tests/ -x -q --timeout=30
-            - For docs changes: verify files exist and are valid markdown/MDX
-            - Ensure no regressions
+            Run targeted pytest (e.g. pytest tests/ -q) or plugin discovery smoke test.
 
-            STEP 5 — CREATE PR:
-            - Commit with descriptive message, push, and create PR using `gh pr create`
-            - For external repos, use `gh pr create -R MervinPraison/<REPO_NAME>`
-            CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link or say "manual push required".
-            NOTE: If you worked on an external repo, the wrapper action will report "No commits" for the main repo at the end. This is expected, do not worry about it.
+            STEP 5 — COMMIT, PUSH, OPEN PR (mandatory if you produced commits):
+            git add -A
+            git commit -m "feat: <short summary> (fixes #${{ github.event.issue.number }})"
+            git push -u origin "$BRANCH"
+            gh pr create --repo "${{ github.repository }}" --base main --head "$BRANCH" --title "feat: <short title>" --body "Fixes #${{ github.event.issue.number }}"
+            CRITICAL: Do not stop after `git push`. You MUST complete `gh pr create` and post the PR URL on the issue.
           allowed_tools: |
             Bash(git:*)
             Bash(python:*)
