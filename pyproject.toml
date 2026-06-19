@@ -21,6 +21,7 @@ custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugi
 basic_tools = "praisonai_plugins.tools.basic_tool:BasicToolPlugin"
 strict_policy = "praisonai_plugins.policies.strict_policy:StrictTypingPolicyPlugin"
 pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
+semantic_loop_detector = "praisonai_plugins.guardrails.semantic_loop_guardrail:SemanticLoopDetectorPlugin"
 researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlugin"
 slack_integration = "praisonai_plugins.integrations.slack_integration:SlackIntegrationPlugin"
 
