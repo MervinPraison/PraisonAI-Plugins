@@ -49,14 +49,13 @@ agent.start("Find information about quantum computing.")
 If the agent gets stuck, the plugin detects the high Jaccard similarity and appends the following intervention directly to the LLM's response stream:
 
 > `[SYSTEM INTERVENTION]: You are repeating a paraphrased version of your previous thoughts or actions. You are stuck in a reasoning loop. You MUST change your strategy, use a different tool, or ask the user for help.`
-
 ## How it differs from existing loop detectors
 
 - **`DoomLoopDetector`**: Looks for *exact* identical tool arguments and consecutive tool calls.
-- **`SemanticLoopDetectorPlugin`**: Looks at the *semantic structure* of the reasoning/output. It catches paraphrasing, synonyms, and slight variations by calculating word overlap (k-gram shingles).
+- **`SemanticLoopDetectorPlugin`**: Looks at near-duplicate phrasing via k-gram token overlap and Jaccard similarity. It catches many paraphrases that still share significant lexical structure.
 
 ## Performance characteristics
 
-- **Latency**: `< 5µs` per detection.
-- **Memory**: Strictly bounded by `window_size` (default 5). It only stores lightweight k-gram hashes, ensuring no runaway memory leaks during long-running agent sessions.
-- **Dependencies**: 100% Python standard library (`re`, `hashlib`, `collections`). Zero external embedding models or network calls.
+- **Latency**: Typically microseconds to sub-millisecond per detection in Python, depending on environment and message length.
+- **Memory**: Strictly bounded by `window_size` (default 5). It only stores lightweight k-grams, ensuring no runaway memory leaks during long-running agent sessions.
+- **Dependencies**: 100% Python standard library (`re`, `threading`, `collections`). Zero external embedding models or network calls.

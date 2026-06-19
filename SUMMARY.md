@@ -13,7 +13,7 @@ By maintaining an internal `deque` history of the last 5 outputs, it tokenizes t
 When the Jaccard similarity between the current output and any previous output exceeds the 0.85 threshold, the plugin dynamically intercepts the output and appends a `[SYSTEM INTERVENTION]` directive. This securely forces the agent to break its reasoning loop without crashing the process.
 
 ## Assumptions Made
-1. **History Scope**: I assumed that preserving state locally on the plugin instance (`self.history`) is safe because the plugin instance persists across the execution lifecycle of the agent running within the same process.
+1. **History Scope**: I assumed that preserving state locally on the plugin instance (`self.detector.history`) using `threading.local()` is safe to ensure each thread (or concurrent agent execution) maintains its own isolated history.
 2. **Intervention Method**: I assumed that injecting an inline `[SYSTEM INTERVENTION]` directly into the `response` string returned from `AFTER_LLM` is the preferred way to natively steer the agent, as PraisonAI passes this returned text back into the LLM context.
 3. **No External Libraries**: I adhered strictly to the "zero dependencies" rule. As a result, the "tokenization" process splits by standard spaces and strips punctuation using `re`, avoiding the need for heavy libraries like `tiktoken` or `nltk`.
 
