@@ -11,7 +11,7 @@ production questions the core gateway cannot:
 
   2. *Is it leaking memory?*  A daemon thread logs a grep-able
      ``[MEMORY] rss=... gc=... threads=... uptime=...`` time-series every N
-     minutes (``resource.getrusage``, falling back to ``psutil`` on Windows),
+     minutes (current RSS via ``/proc/self/statm``, falling back to ``psutil``),
      with a baseline on start and a final snapshot on GATEWAY_STOP.
 
 Everything is optional and OS-aware: ``resource``/``psutil``/``/proc`` are
@@ -37,23 +37,31 @@ logger = get_logger(__name__)
 _PLANNED_STOP_ENV = "PRAISONAI_PLANNED_STOP"
 
 
-def _read_proc_rss_bytes() -> Optional[int]:
-    """Best-effort resident set size in bytes. Returns None if unavailable."""
-    # Linux/most-Unix: resource.getrusage (ru_maxrss is KB on Linux, bytes on macOS)
-    try:
-        import resource
+_PAGE_SIZE = 4096
+try:  # resource.getpagesize is the most portable way to size statm pages.
+    import resource as _resource_mod
 
-        usage = resource.getrusage(resource.RUSAGE_SELF)
-        maxrss = usage.ru_maxrss
-        if maxrss:
-            # macOS reports bytes; Linux reports kilobytes.
-            if platform.system() == "Darwin":
-                return int(maxrss)
-            return int(maxrss) * 1024
+    _PAGE_SIZE = _resource_mod.getpagesize()
+except Exception:
+    pass
+
+
+def _read_proc_rss_bytes() -> Optional[int]:
+    """Best-effort *current* resident set size in bytes. Returns None if unavailable.
+
+    Note: this deliberately does NOT use ``resource.getrusage().ru_maxrss``,
+    which is the process high-water mark (peak RSS), not the live RSS -- a leak
+    monitor needs current usage so it can see memory both grow and shrink.
+    """
+    # Linux/most-Unix: /proc/self/statm reports current RSS in pages.
+    try:
+        with open("/proc/self/statm", "r") as fh:
+            rss_pages = int(fh.read().split()[1])
+        return rss_pages * _PAGE_SIZE
     except Exception:
         pass
 
-    # Windows / fallback: psutil if installed (optional dependency).
+    # macOS/Windows/fallback: psutil if installed (optional dependency).
     try:
         import psutil
 
@@ -61,6 +69,22 @@ def _read_proc_rss_bytes() -> Optional[int]:
     except Exception:
         pass
 
+    return None
+
+
+def _read_peak_rss_bytes() -> Optional[int]:
+    """Best-effort *peak* RSS (high-water mark) in bytes. Returns None if unavailable."""
+    try:
+        import resource
+
+        maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if maxrss:
+            # macOS reports bytes; Linux reports kilobytes.
+            if platform.system() == "Darwin":
+                return int(maxrss)
+            return int(maxrss) * 1024
+    except Exception:
+        pass
     return None
 
 
@@ -142,15 +166,20 @@ class GatewayForensicsPlugin(Plugin):
 
     @property
     def info(self) -> PluginInfo:
+        # Reference hooks defensively: if an older praisonaiagents lacks the
+        # GATEWAY_* enum members, skip them so plugin discovery still succeeds
+        # (the feature is simply inert) instead of raising AttributeError.
+        hooks = [
+            getattr(PluginHook, name)
+            for name in ("GATEWAY_START", "GATEWAY_STOP")
+            if hasattr(PluginHook, name)
+        ]
         return PluginInfo(
             name="gateway_forensics",
             version="1.0.0",
             description="Crash/shutdown forensics and memory-leak monitoring for long-running gateways.",
             author="PraisonAI",
-            hooks=[
-                PluginHook.GATEWAY_START,
-                PluginHook.GATEWAY_STOP,
-            ],
+            hooks=hooks,
         )
 
     # ------------------------------------------------------------------ hooks
@@ -282,14 +311,16 @@ class GatewayForensicsPlugin(Plugin):
     def _log_memory_usage(self, tag: str = "periodic") -> None:
         try:
             rss = _read_proc_rss_bytes()
+            peak = _read_peak_rss_bytes()
             counts = gc.get_count()
             uptime = int(time.time() - self._start_time)
             delta = ""
             if rss is not None and self._baseline_rss:
                 growth = rss - self._baseline_rss
                 delta = f" delta={_format_mb(growth)}"
+            peak_str = "" if peak is None else f" peak={_format_mb(peak)}"
             logger.info(
-                f"[MEMORY] tag={tag} rss={_format_mb(rss)}{delta} "
+                f"[MEMORY] tag={tag} rss={_format_mb(rss)}{delta}{peak_str} "
                 f"gc={counts} threads={threading.active_count()} uptime={uptime}s"
             )
         except Exception as exc:
