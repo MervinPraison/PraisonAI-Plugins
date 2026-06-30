@@ -18,6 +18,7 @@ dependencies = [
 [project.entry-points."praisonai.plugins"]
 simple_logger = "praisonai_plugins.hooks.simple_logger:SimpleLoggerPlugin"
 custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugin"
+gateway_forensics = "praisonai_plugins.observability.gateway_forensics:GatewayForensicsPlugin"
 basic_tools = "praisonai_plugins.tools.basic_tool:BasicToolPlugin"
 strict_policy = "praisonai_plugins.policies.strict_policy:StrictTypingPolicyPlugin"
 pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
