@@ -1,7 +1,7 @@
 """
 Policy Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from typing import Optional
 
 class StrictTypingPolicyPlugin(Plugin):
@@ -15,7 +15,8 @@ class StrictTypingPolicyPlugin(Plugin):
             name="strict_policy",
             version="1.0.0",
             description="Enforces strict operational policies and permissions.",
-            author="PraisonAI"
+            author="PraisonAI",
+            hooks=[PluginHook.ON_PERMISSION_ASK],
         )
         
     def on_permission_ask(self, target: str, reason: str) -> Optional[bool]:

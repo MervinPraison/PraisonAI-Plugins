@@ -1,7 +1,7 @@
 """
 Skills Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from typing import Dict, Any
 
 class ResearcherSkillPlugin(Plugin):
@@ -15,7 +15,8 @@ class ResearcherSkillPlugin(Plugin):
             name="researcher_skill",
             version="1.0.0",
             description="Capabilities related to deep research.",
-            author="PraisonAI"
+            author="PraisonAI",
+            hooks=[PluginHook.BEFORE_AGENT],
         )
         
     def before_agent(self, prompt: str, context: Dict[str, Any]) -> str:
