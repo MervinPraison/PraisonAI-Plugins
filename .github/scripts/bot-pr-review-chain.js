@@ -36,7 +36,9 @@ function coderabbitKickPosted(comments) {
 }
 
 function qodoKickPosted(comments) {
-  return comments.some((c) => kickAuthored(c, '/review'));
+  return comments.some(
+    (c) => KICK_AUTHORS.has(c.user?.login) && (c.body || '').trim() === '/review'
+  );
 }
 
 function chainKickPosted(comments) {

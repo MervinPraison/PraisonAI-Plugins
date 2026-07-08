@@ -51,7 +51,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function isFinalClaudeTriggerComment(c) {
   const body = (c.body || '').toLowerCase();
-  if (!AUTO_ACTORS.includes(c.user.login)) return false;
+  if (!AUTO_ACTORS.includes(c.user?.login)) return false;
   if (!body.includes('@claude')) return false;
   if (body.includes('merge conflict')) return false;
   return body.includes('final architecture reviewer') || body.includes('lead engineer');
@@ -74,7 +74,7 @@ function isClaudeFinalReplyComment(c) {
 function hasRecentClaudeTrigger(comments, minutes = 35) {
   const cutoff = Date.now() - minutes * 60 * 1000;
   return comments.some((c) => {
-    if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
+    if (!CLAUDE_TRIGGER_LOGINS.includes(c.user?.login)) return false;
     if (isClaudeTriggerNoise(c)) return false;
     if (!(c.body || '').includes('@claude')) return false;
     return new Date(c.created_at).getTime() > cutoff;
@@ -82,7 +82,7 @@ function hasRecentClaudeTrigger(comments, minutes = 35) {
 }
 
 function isConflictRebaseTriggerComment(c) {
-  if (!AUTO_ACTORS.includes(c.user.login)) return false;
+  if (!AUTO_ACTORS.includes(c.user?.login)) return false;
   const body = (c.body || '').toLowerCase();
   return body.includes('@claude') && body.includes('merge conflict');
 }
@@ -185,7 +185,7 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   });
   if (claudeRepliedAfterFinal) return false;
   const claudeSinceHead = comments.some((c) => {
-    if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
+    if (!CLAUDE_TRIGGER_LOGINS.includes(c.user?.login)) return false;
     if (isClaudeTriggerNoise(c)) return false;
     if (!(c.body || '').includes('@claude')) return false;
     return new Date(c.created_at).getTime() >= headTime - 60000;
@@ -280,15 +280,15 @@ async function getMergeState(github, owner, repo, prNumber) {
   `;
   for (let attempt = 0; attempt < 3; attempt++) {
     const result = await github.graphql(query, { owner, repo, number: prNumber });
-    const prGql = result.repository.pullRequest;
+    const prGql = result?.repository?.pullRequest;
     const status = (prGql?.mergeStateStatus || '').toUpperCase();
     if (status && status !== 'UNKNOWN') {
       return {
         status,
-        isDraft: prGql.isDraft,
-        headRepo: prGql.headRef?.repository?.nameWithOwner,
-        headSha: prGql.headRefOid,
-        maintainerCanModify: prGql.maintainerCanModify === true,
+        isDraft: prGql?.isDraft,
+        headRepo: prGql?.headRef?.repository?.nameWithOwner,
+        headSha: prGql?.headRefOid,
+        maintainerCanModify: prGql?.maintainerCanModify === true,
       };
     }
     if (attempt < 2) await sleep(10000);
@@ -297,8 +297,8 @@ async function getMergeState(github, owner, repo, prNumber) {
   return {
     status: (pr.mergeable_state || '').toUpperCase(),
     isDraft: pr.draft,
-    headRepo: pr.head.repo?.full_name,
-    headSha: pr.head.sha,
+    headRepo: pr.head?.repo?.full_name,
+    headSha: pr.head?.sha,
     maintainerCanModify: pr.maintainer_can_modify === true,
   };
 }

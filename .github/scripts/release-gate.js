@@ -21,7 +21,7 @@ function readVersionsFromTree(root = '.') {
   const path = require('path');
   const toml = fs.readFileSync(path.join(root, 'pyproject.toml'), 'utf8');
   const match = toml.match(/^version\s*=\s*"([^"]+)"/m);
-  if (!match) throw new Error('Could not read aiui version from pyproject.toml');
+  if (!match) throw new Error('Could not read version from pyproject.toml');
   const current = match[1];
   const target = bumpPatch(current);
   return { current, target, packageName: config.pypiPackageName };

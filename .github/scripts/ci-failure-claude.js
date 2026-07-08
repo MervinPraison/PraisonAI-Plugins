@@ -28,7 +28,7 @@ function isCiFixComment(comment) {
 function hasCiFixCommentForSha(comments, headSha) {
   const marker = shortSha(headSha).toLowerCase();
   return comments.some((c) => {
-    if (!AUTO_ACTORS.includes(c.user.login)) return false;
+    if (!AUTO_ACTORS.includes(c.user?.login)) return false;
     if (!isCiFixComment(c)) return false;
     return (c.body || '').toLowerCase().includes(marker);
   });
@@ -38,7 +38,7 @@ function hasRecentCiFixComment(comments, headSha) {
   const cutoff = Date.now() - COOLDOWN_MS;
   const marker = shortSha(headSha).toLowerCase();
   return comments.some((c) => {
-    if (!AUTO_ACTORS.includes(c.user.login)) return false;
+    if (!AUTO_ACTORS.includes(c.user?.login)) return false;
     if (!isCiFixComment(c)) return false;
     const body = (c.body || '').toLowerCase();
     if (body.includes(marker)) return true;
