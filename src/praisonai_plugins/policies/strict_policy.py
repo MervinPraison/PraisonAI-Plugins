@@ -2,7 +2,7 @@
 Policy Plugin for PraisonAI Agents.
 """
 from praisonaiagents.plugins.plugin import Plugin, PluginInfo
-from typing import Dict, Any, Optional
+from typing import Optional
 
 class StrictTypingPolicyPlugin(Plugin):
     """
