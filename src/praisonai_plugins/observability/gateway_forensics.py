@@ -25,7 +25,7 @@ import platform
 import signal
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger

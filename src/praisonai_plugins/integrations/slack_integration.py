@@ -3,7 +3,7 @@ Integration Plugin for PraisonAI Agents.
 """
 from praisonaiagents.plugins.plugin import Plugin, PluginInfo
 from praisonaiagents._logging import get_logger
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 logger = get_logger(__name__)
 
