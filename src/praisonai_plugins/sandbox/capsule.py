@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
@@ -27,9 +28,10 @@ class CapsuleSandbox:
 
     def __init__(self, config: Optional[Any] = None, timeout: int = 60):
         self.config = config
-        self.timeout = timeout
+        self.timeout = getattr(config, "timeout", timeout) if config is not None else timeout
         self._sandbox = None
         self._is_running = False
+        self._lock = threading.Lock()
 
     @property
     def is_available(self) -> bool:
@@ -44,22 +46,37 @@ class CapsuleSandbox:
         return "capsule"
 
     async def start(self) -> None:
-        if self._is_running:
-            return
-        if not self.is_available:
-            raise RuntimeError(f"Capsule backend not available. Install with: {_INSTALL_HINT}")
-        try:
-            import capsule
+        with self._lock:
+            if self._is_running:
+                return
+            if not self.is_available:
+                raise RuntimeError(f"Capsule backend not available. Install with: {_INSTALL_HINT}")
+            try:
+                import capsule
 
-            self._sandbox = capsule.Sandbox()
-            self._is_running = True
-            logger.info("Capsule sandbox initialized")
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize Capsule sandbox: {e}") from e
+                self._sandbox = capsule.Sandbox()
+                self._is_running = True
+                logger.info("Capsule sandbox initialized")
+            except Exception as e:
+                raise RuntimeError(f"Failed to initialize Capsule sandbox: {e}") from e
 
-    async def stop(self) -> None:
+    def _teardown_sandbox(self) -> None:
+        sandbox = self._sandbox
         self._sandbox = None
         self._is_running = False
+        if sandbox is not None:
+            for method in ("close", "shutdown", "stop"):
+                closer = getattr(sandbox, method, None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:  # noqa: BLE001
+                        logger.warning("Capsule sandbox %s() raised during teardown", method)
+                    break
+
+    async def stop(self) -> None:
+        with self._lock:
+            self._teardown_sandbox()
         logger.info("Capsule sandbox stopped")
 
     async def execute(
@@ -77,13 +94,14 @@ class CapsuleSandbox:
         started_at = time.time()
 
         if language.lower() != "python":
+            completed_at = time.time()
             return SandboxResult(
                 execution_id=execution_id,
                 status=SandboxStatus.FAILED,
                 error=f"Capsule sandbox only supports Python, got {language!r}",
                 started_at=started_at,
-                completed_at=time.time(),
-                duration_seconds=time.time() - started_at,
+                completed_at=completed_at,
+                duration_seconds=completed_at - started_at,
                 metadata={"platform": "capsule", "language": language},
             )
 
@@ -100,6 +118,7 @@ class CapsuleSandbox:
                 result = await future
 
             completed_at = time.time()
+            duration = completed_at - started_at
             status = SandboxStatus.COMPLETED if result["exit_code"] == 0 else SandboxStatus.FAILED
             return SandboxResult(
                 execution_id=execution_id,
@@ -107,22 +126,24 @@ class CapsuleSandbox:
                 exit_code=result["exit_code"],
                 stdout=result["stdout"],
                 stderr=result["stderr"],
-                duration_seconds=completed_at - started_at,
+                duration_seconds=duration,
                 started_at=started_at,
                 completed_at=completed_at,
                 metadata={"platform": "capsule", "language": language},
             )
         except asyncio.TimeoutError:
+            completed_at = time.time()
             return SandboxResult(
                 execution_id=execution_id,
                 status=SandboxStatus.TIMEOUT,
                 error=f"Execution exceeded timeout of {timeout}s",
                 started_at=started_at,
-                completed_at=time.time(),
-                duration_seconds=time.time() - started_at,
+                completed_at=completed_at,
+                duration_seconds=completed_at - started_at,
                 metadata={"platform": "capsule", "language": language},
             )
         except Exception as e:
+            completed_at = time.time()
             error_msg = str(e)
             status = SandboxStatus.TIMEOUT if "timeout" in error_msg.lower() else SandboxStatus.FAILED
             return SandboxResult(
@@ -130,16 +151,23 @@ class CapsuleSandbox:
                 status=status,
                 error=error_msg,
                 started_at=started_at,
-                completed_at=time.time(),
-                duration_seconds=time.time() - started_at,
+                completed_at=completed_at,
+                duration_seconds=completed_at - started_at,
                 metadata={"platform": "capsule", "language": language},
             )
 
     def _run_code(self, code: str, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-        try:
-            result = self._sandbox.run(code, env=env)
-        except TypeError:
-            result = self._sandbox.run(code)
+        sandbox = self._sandbox
+        if sandbox is None:
+            raise RuntimeError("Capsule sandbox is not running")
+        with self._lock:
+            try:
+                result = sandbox.run(code, env=env)
+            except TypeError as e:
+                if "keyword argument" in str(e):
+                    result = sandbox.run(code)
+                else:
+                    raise
 
         stdout = getattr(result, "stdout", None)
         if stdout is None:
@@ -155,18 +183,29 @@ class CapsuleSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
+        started_at = time.time()
         try:
-            with open(file_path, "r", encoding="utf-8") as fh:
-                content = fh.read()
+            loop = asyncio.get_running_loop()
+
+            def _read_file() -> str:
+                with open(file_path, "r", encoding="utf-8") as fh:
+                    return fh.read()
+
+            content = await loop.run_in_executor(None, _read_file)
         except OSError as e:
+            completed_at = time.time()
             return SandboxResult(
                 execution_id=str(uuid.uuid4()),
                 status=SandboxStatus.FAILED,
                 error=f"Could not read file {file_path!r}: {e}",
-                started_at=time.time(),
-                completed_at=time.time(),
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_seconds=completed_at - started_at,
                 metadata={"platform": "capsule", "file": file_path},
             )
+        if args:
+            argv = [file_path] + list(args)
+            content = f"import sys\nsys.argv = {argv!r}\n" + content
         return await self.execute(content, "python", limits, env)
 
     async def run_command(
@@ -176,12 +215,14 @@ class CapsuleSandbox:
         env: Optional[Dict[str, str]] = None,
         working_dir: Optional[str] = None,
     ) -> SandboxResult:
+        now = time.time()
         return SandboxResult(
             execution_id=str(uuid.uuid4()),
             status=SandboxStatus.FAILED,
             error="Capsule sandbox does not support shell commands.",
-            started_at=time.time(),
-            completed_at=time.time(),
+            started_at=now,
+            completed_at=now,
+            duration_seconds=0.0,
             metadata={"platform": "capsule"},
         )
 
@@ -206,8 +247,8 @@ class CapsuleSandbox:
         }
 
     async def cleanup(self) -> None:
-        self._sandbox = None
-        self._is_running = False
+        with self._lock:
+            self._teardown_sandbox()
         logger.info("Capsule sandbox cleanup complete")
 
     async def reset(self) -> None:
