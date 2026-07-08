@@ -1,7 +1,7 @@
 """
 Integration Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
 from typing import Dict, Any
 
@@ -18,7 +18,8 @@ class SlackIntegrationPlugin(Plugin):
             name="slack_integration",
             version="1.0.0",
             description="Integrates PraisonAI with Slack.",
-            author="PraisonAI"
+            author="PraisonAI",
+            hooks=[PluginHook.ON_INIT, PluginHook.AFTER_AGENT],
         )
 
     def on_init(self, context: Dict[str, Any]) -> None:

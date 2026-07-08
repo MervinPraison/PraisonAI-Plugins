@@ -15,6 +15,10 @@ dependencies = [
     "praisonaiagents>=0.1.0",
 ]
 
+[project.optional-dependencies]
+capsule = ["capsule>=0.1.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
+
 [project.entry-points."praisonai.plugins"]
 simple_logger = "praisonai_plugins.hooks.simple_logger:SimpleLoggerPlugin"
 custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugin"
@@ -26,6 +30,13 @@ pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
 researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlugin"
 slack_integration = "praisonai_plugins.integrations.slack_integration:SlackIntegrationPlugin"
 
+[project.entry-points."praisonai.sandbox"]
+capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["praisonai_plugins", "praisonai_plugins.*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

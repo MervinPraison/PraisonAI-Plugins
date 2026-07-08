@@ -100,6 +100,28 @@ Now, every time *any* agent inside your Python environment receives a response c
 
 ---
 
+## Sandbox Backends (`praisonai.sandbox`)
+
+Optional sandbox backends (e.g. **Capsule** for WebAssembly isolation) live in this repo and register via the **`praisonai.sandbox`** entry-point group — separate from lifecycle hooks (`praisonai.plugins`).
+
+```bash
+pip install praisonai-plugins[capsule]
+```
+
+```python
+from praisonaiagents.sandbox import SandboxManager, SandboxConfig
+
+manager = SandboxManager(SandboxConfig.capsule())
+result = manager.run_code("print('hello')", language="python")
+```
+
+| Entry point group | Purpose | Example |
+|-------------------|---------|---------|
+| `praisonai.plugins` | Lifecycle hooks, guardrails, policies | `simple_logger`, `pii_guardrail` |
+| `praisonai.sandbox` | Optional sandbox backends | `capsule` |
+
+---
+
 ## The PraisonAI Protocol Philosophy
 
 Built with developers in mind, PraisonAI's architectural design features:
