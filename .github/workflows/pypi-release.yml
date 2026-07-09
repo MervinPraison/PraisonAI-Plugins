@@ -128,6 +128,8 @@ jobs:
           TAG="v${VERSION}"
           git add pyproject.toml
           git commit -m "Release ${TAG}" || exit 0
+          # uv lock may dirty tracked uv.lock; discard so rebase can proceed
+          git checkout -- uv.lock 2>/dev/null || true
           git tag -f "${TAG}"
           git pull --rebase origin main
           git push origin main
