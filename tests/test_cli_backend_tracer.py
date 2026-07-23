@@ -12,6 +12,18 @@ def test_create_plugin_factory():
     assert isinstance(create_plugin(), CliBackendTracerPlugin)
 
 
+def test_info_accessible_regardless_of_core_hook_support():
+    from praisonaiagents.plugins.plugin import PluginHook
+
+    info = CliBackendTracerPlugin().info
+
+    assert info.name == "cli_backend_tracer"
+    if hasattr(PluginHook, "CLI_BACKEND_EXECUTE"):
+        assert info.hooks == [PluginHook.CLI_BACKEND_EXECUTE]
+    else:
+        assert info.hooks == []
+
+
 def test_cli_backend_tracer_logs_when_enabled(monkeypatch, caplog):
     monkeypatch.setenv("PRAISONAI_CLI_BACKEND_DEBUG", "1")
     caplog.set_level(logging.INFO)

@@ -23,12 +23,21 @@ class CliBackendTracerPlugin(Plugin):
 
     @property
     def info(self) -> PluginInfo:
+        # Reference the hook defensively: an older praisonaiagents may lack the
+        # CLI_BACKEND_EXECUTE enum member (it ships with PraisonAI #3334), so
+        # skip it rather than raising AttributeError. Plugin discovery then still
+        # succeeds and the tracer is simply inert until the core hook exists.
+        hooks = [
+            getattr(PluginHook, name)
+            for name in ("CLI_BACKEND_EXECUTE",)
+            if hasattr(PluginHook, name)
+        ]
         return PluginInfo(
             name="cli_backend_tracer",
             version="1.0.0",
             description="Logs CLI backend subprocess delegation (no PraisonAI LLM HTTP).",
             author="PraisonAI",
-            hooks=[PluginHook.CLI_BACKEND_EXECUTE],
+            hooks=hooks,
         )
 
     def cli_backend_execute(self, context: Dict[str, Any]) -> None:
