@@ -31,6 +31,7 @@ pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
 researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlugin"
 skill_curator = "praisonai_plugins.skills.curator:SkillCuratorPlugin"
 slack_integration = "praisonai_plugins.integrations.slack_integration:SlackIntegrationPlugin"
+perseus_vault = "praisonai_plugins.integrations.perseus_vault:PerseusVaultPlugin"
 
 [project.entry-points."praisonai.sandbox"]
 capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
