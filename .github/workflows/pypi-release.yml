@@ -115,19 +115,17 @@ jobs:
       - name: Publish to PyPI
         if: inputs.dry_run != true
         env:
-          # Prefer API token if present; otherwise uv publish uses GitHub OIDC
-          # (PyPI Trusted Publisher must be configured for this workflow + environment).
-          PYPI_TOKEN_VALUE: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
+          # PyPI API token auth: username __token__, password = pypi-… token (see pypi.org/help/#invalid-auth)
+          UV_PUBLISH_USERNAME: __token__
+          UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
         run: |
           set -euo pipefail
           uv lock
           uv build
-          if [ -n "${PYPI_TOKEN_VALUE}" ]; then
-            UV_PUBLISH_TOKEN="${PYPI_TOKEN_VALUE}" uv publish
-          else
+          if [ -z "${UV_PUBLISH_PASSWORD}" ]; then
             echo "No PYPI_TOKEN/PYPI_API_TOKEN — publishing via Trusted Publishing (OIDC)"
-            uv publish
           fi
+          uv publish
 
       - name: Commit, tag, and release
         if: inputs.dry_run != true
