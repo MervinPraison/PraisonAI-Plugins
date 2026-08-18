@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import pytest
-from dhms_agentfuse import RuntimeGuard
+from dhms_agentfuse import RuntimeGuard, RuntimeGuardDecision, ToolCallRequest
 from praisonaiagents import Agent
 from praisonaiagents.hooks import InvocationContext, ToolRequest
 
 from praisonai_plugins.guardrails.agentfuse import AgentFuseToolMiddleware
+
+
+class RecordingRuntimeGuard(RuntimeGuard):
+    """Keep completed decisions inside one test instead of production state."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.recorded_decisions: list[RuntimeGuardDecision] = []
+
+    def evaluate(self, tool_call: ToolCallRequest) -> RuntimeGuardDecision:
+        decision = super().evaluate(tool_call)
+        self.recorded_decisions.append(decision)
+        return decision
 
 
 def _sync_agent(guard: RuntimeGuard):
@@ -29,9 +42,8 @@ def _sync_agent(guard: RuntimeGuard):
 
 
 def test_sync_allow_dispatches_once_and_preserves_identity():
-    agent, middleware, calls = _sync_agent(
-        RuntimeGuard(allow_tools={"protected_write"})
-    )
+    guard = RecordingRuntimeGuard(allow_tools={"protected_write"})
+    agent, _, calls = _sync_agent(guard)
 
     result = agent.execute_tool(
         "protected_write", {"value": "synthetic-value"}, "praison-allow-001"
@@ -39,13 +51,12 @@ def test_sync_allow_dispatches_once_and_preserves_identity():
 
     assert result == "write completed"
     assert calls == ["synthetic-value"]
-    assert middleware.decision_for("praison-allow-001").tool_call_id == (
-        "praison-allow-001"
-    )
+    assert guard.recorded_decisions[0].tool_call_id == "praison-allow-001"
 
 
 def test_sync_block_returns_non_execution_without_dispatch():
-    agent, middleware, calls = _sync_agent(RuntimeGuard(deny_tools={"protected_write"}))
+    guard = RecordingRuntimeGuard(deny_tools={"protected_write"})
+    agent, _, calls = _sync_agent(guard)
 
     result = agent.execute_tool(
         "protected_write", {"value": "synthetic-value"}, "praison-block-001"
@@ -59,7 +70,7 @@ def test_sync_block_returns_non_execution_without_dispatch():
         "outcome": "not_executed",
         "handler_started": False,
     }
-    assert middleware.decision_for("praison-block-001").action == "block"
+    assert guard.recorded_decisions[0].action == "block"
 
 
 def test_runtime_guard_policy_error_fails_closed_without_dispatch():
@@ -67,7 +78,8 @@ def test_runtime_guard_policy_error_fails_closed_without_dispatch():
         del tool_call
         raise RuntimeError("synthetic policy failure")
 
-    agent, middleware, calls = _sync_agent(RuntimeGuard(policy=failing_policy))
+    guard = RecordingRuntimeGuard(policy=failing_policy)
+    agent, _, calls = _sync_agent(guard)
 
     result = agent.execute_tool(
         "protected_write", {"value": "synthetic-value"}, "praison-policy-001"
@@ -76,9 +88,7 @@ def test_runtime_guard_policy_error_fails_closed_without_dispatch():
     assert calls == []
     assert result["reason_code"] == "policy_exception"
     assert result["host_execution"]["handler_started"] is False
-    assert middleware.decision_for("praison-policy-001").reason_code == (
-        "policy_exception"
-    )
+    assert guard.recorded_decisions[0].reason_code == "policy_exception"
 
 
 def test_adapter_evaluate_exception_fails_closed_without_dispatch():
@@ -162,4 +172,5 @@ def test_handler_failure_after_allow_is_not_converted_to_policy_block():
     with pytest.raises(RuntimeError, match="synthetic handler failure"):
         middleware(request, failing_handler)
 
-    assert middleware.decision_for("praison-handler-failure-001").action == "allow"
+    assert request.context is not None
+    assert request.context.metadata["agentfuse_decision"].action == "allow"

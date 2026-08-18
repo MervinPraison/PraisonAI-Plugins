@@ -25,12 +25,7 @@ class AgentFuseToolMiddleware:
 
         self._guard = guard
         self._request_type = ToolCallRequest
-        self._decisions: dict[str, Any] = {}
         wrap_tool_call(self)
-
-    def decision_for(self, tool_call_id: str) -> Any | None:
-        """Return the completed policy decision for a tool call, if available."""
-        return self._decisions.get(tool_call_id)
 
     def _not_executed_response(
         self,
@@ -69,9 +64,8 @@ class AgentFuseToolMiddleware:
         call_next: Callable[[ToolRequest], ToolResponse],
     ) -> ToolResponse:
         context = request.context
-        tool_call_id = (
-            context.metadata.get("tool_call_id") if context is not None else None
-        )
+        metadata = context.metadata if context is not None else {}
+        tool_call_id = metadata.get("tool_call_id")
         if not tool_call_id:
             return self._not_executed_response(
                 request,
@@ -99,7 +93,7 @@ class AgentFuseToolMiddleware:
                 guard_failed=True,
             )
 
-        self._decisions[tool_call_id] = decision
+        metadata["agentfuse_decision"] = decision
         if decision.action == "block":
             return self._not_executed_response(
                 request,
