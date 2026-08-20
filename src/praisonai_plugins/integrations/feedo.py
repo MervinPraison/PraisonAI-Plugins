@@ -71,7 +71,7 @@ class FeedoMemoryAdapter:
             from feedo import FeedoMemory
         except ImportError as e:  # pragma: no cover
             raise ImportError(
-                "feedo-sdk is not installed. Run: pip install feedo-sdk"
+                "feedo-sdk is not installed. Run: pip install feedo-sdk>=0.1.24"
             ) from e
 
         self._memory = FeedoMemory(
@@ -169,12 +169,22 @@ class FeedoPlugin(Plugin):
         try:
             from praisonaiagents.memory.adapters import register_memory_factory
         except ImportError as exc:
-            logger.warning(
-                "[INTEGRATION] Feedo memory adapter not available — "
-                "install praisonaiagents with memory support. (%s)",
-                exc,
-            )
-            return
+            # Only swallow a genuinely-absent root package. Anything else
+            # (broken transitive import, or an incompatible praisonaiagents
+            # without `register_memory_factory`) must surface, not be masked
+            # as "optional dependency not installed".
+            if exc.name in (
+                "praisonaiagents",
+                "praisonaiagents.memory",
+                "praisonaiagents.memory.adapters",
+            ):
+                logger.warning(
+                    "[INTEGRATION] Feedo memory adapter not available — "
+                    "install praisonaiagents with memory support. (%s)",
+                    exc,
+                )
+                return
+            raise
 
         register_memory_factory("feedo", create_feedo_memory_adapter)
         logger.info("[INTEGRATION] Feedo memory adapter registered.")

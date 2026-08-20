@@ -72,6 +72,22 @@ def test_on_init_warns_when_registry_unavailable(plugin, monkeypatch, caplog):
     assert any("Feedo memory adapter not available" in r.message for r in warnings)
 
 
+def test_on_init_raises_on_broken_transitive_import(plugin, monkeypatch):
+    """A broken transitive import must surface, not be masked as 'absent'."""
+    fail_import(monkeypatch, ADAPTERS_MOD, "some_broken_dependency")
+
+    with pytest.raises(ImportError, match="some_broken_dependency"):
+        plugin.on_init({})
+
+
+def test_on_init_raises_on_version_mismatch(plugin, monkeypatch):
+    """An incompatible praisonaiagents (no register_memory_factory) must surface."""
+    fail_import(monkeypatch, ADAPTERS_MOD, "register_memory_factory")
+
+    with pytest.raises(ImportError, match="register_memory_factory"):
+        plugin.on_init({})
+
+
 def test_create_adapter_requires_identity():
     """No usage_key/private_key -> clear ValueError with setup guidance."""
     with pytest.raises(ValueError, match="usage_key"):
