@@ -27,6 +27,7 @@ gateway_forensics = "praisonai_plugins.observability.gateway_forensics:GatewayFo
 memory_watchdog = "praisonai_plugins.observability.memory_watchdog:MemoryWatchdogPlugin"
 basic_tools = "praisonai_plugins.tools.basic_tool:BasicToolPlugin"
 strict_policy = "praisonai_plugins.policies.strict_policy:StrictTypingPolicyPlugin"
+workspace_command_policy = "praisonai_plugins.policies.workspace_command_policy:WorkspaceCommandPolicy"
 pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
 researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlugin"
 skill_curator = "praisonai_plugins.skills.curator:SkillCuratorPlugin"
