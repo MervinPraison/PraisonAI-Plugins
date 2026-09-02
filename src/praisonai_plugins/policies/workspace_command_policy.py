@@ -164,7 +164,7 @@ class WorkspaceCommandPolicy(Plugin):
         root = os.path.realpath(self._workspace_root or os.getcwd())
         try:
             writes = self._extract_write_targets(command)
-        except ValueError as exc:  # fail closed on parse failure
+        except Exception as exc:  # noqa: BLE001 - fail closed on any parse failure
             logger.debug("workspace_command_policy parse error: %s", exc)
             if self._on_parse_error == "allow":
                 return None
@@ -284,9 +284,10 @@ class WorkspaceCommandPolicy(Plugin):
         binary = os.path.basename(stripped[0])
         rest = stripped[1:]
 
-        if binary in self._mutating_binaries or (
-            binary == "sed" and any(a == "-i" or a.startswith("-i") for a in rest)
-        ):
+        is_sed_inplace = binary == "sed" and any(
+            a == "-i" or a.startswith("-i") for a in rest
+        )
+        if binary in self._mutating_binaries or is_sed_inplace:
             targets.extend(self._positional_paths(rest))
         elif binary == "find" and any(
             a in ("-delete",) for a in rest
