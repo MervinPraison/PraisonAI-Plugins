@@ -120,6 +120,33 @@ result = manager.run_code("print('hello')", language="python")
 | `praisonai.plugins` | Lifecycle hooks, guardrails, policies | `simple_logger`, `pii_guardrail` |
 | `praisonai.sandbox` | Optional sandbox backends | `capsule` |
 
+## AgentFuse Tool Guardrail
+
+The optional AgentFuse middleware evaluates a tool-call policy through
+PraisonAI's public `wrap_tool_call` boundary before the protected handler starts.
+
+```bash
+pip install -e ".[agentfuse]"
+```
+
+```python
+from dhms_agentfuse import RuntimeGuard
+from praisonaiagents import Agent
+from praisonai_plugins.guardrails.agentfuse import AgentFuseToolMiddleware
+
+guard = RuntimeGuard(deny_tools={"protected_write"})
+agent = Agent(
+    name="guarded-agent",
+    instructions="Use tools when needed.",
+    hooks=[AgentFuseToolMiddleware(guard)],
+)
+```
+
+An allowed call continues through PraisonAI's existing handler chain. A blocked
+call, missing tool-call identity, or unexpected guard-evaluation exception returns
+a host-native `ToolResponse` with `outcome=not_executed`; it does not claim that a
+handler failed after execution began.
+
 ---
 
 ## The PraisonAI Protocol Philosophy
