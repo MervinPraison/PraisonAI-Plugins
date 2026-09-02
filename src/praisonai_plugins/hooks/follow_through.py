@@ -37,12 +37,12 @@ import os
 import re
 import threading
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -87,12 +87,12 @@ class Commitment:
     dedupe_key: str
     due_at: float
     confidence: float
-    channel: Optional[str] = None
-    session_id: Optional[str] = None
+    channel: str | None = None
+    session_id: str | None = None
     status: CommitmentStatus = CommitmentStatus.PENDING
     created_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["kind"] = self.kind.value
         data["status"] = self.status.value
@@ -110,7 +110,7 @@ class CommitmentStore:
 
     def __init__(self, max_pending: int = _DEFAULT_MAX_PENDING) -> None:
         self._lock = threading.Lock()
-        self._by_key: Dict[str, Commitment] = {}
+        self._by_key: dict[str, Commitment] = {}
         self._max_pending = max(1, int(max_pending))
 
     def add_if_new(self, commitment: Commitment) -> bool:
@@ -136,13 +136,13 @@ class CommitmentStore:
             self._by_key[commitment.dedupe_key] = commitment
             return True
 
-    def get(self, dedupe_key: str) -> Optional[Commitment]:
+    def get(self, dedupe_key: str) -> Commitment | None:
         with self._lock:
             return self._by_key.get(dedupe_key)
 
     def list(
-        self, status: Optional[CommitmentStatus] = None
-    ) -> List[Commitment]:
+        self, status: CommitmentStatus | None = None
+    ) -> list[Commitment]:
         with self._lock:
             values = list(self._by_key.values())
         if status is None:
@@ -192,7 +192,7 @@ _WHEN_RE = re.compile(
 )
 
 
-def _when_to_seconds(when: Optional[str]) -> int:
+def _when_to_seconds(when: str | None) -> int:
     """Map a coarse 'when' phrase to a delay in seconds (best-effort)."""
     if not when:
         return _ONE_DAY
@@ -215,13 +215,13 @@ def _when_to_seconds(when: Optional[str]) -> int:
 
 def _heuristic_extract(
     transcript: str, response: str
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Dependency-free, high-precision extraction fallback.
 
     Returns raw candidate dicts (``kind``/``summary``/``when``/``confidence``/
     ``topic``) which the caller normalises into :class:`Commitment` objects.
     """
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
 
     # 1) Agent promise -- look in the agent's own response.
     if _AGENT_PROMISE_RE.search(response or ""):
@@ -275,7 +275,7 @@ _LLM_PROMPT = (
 
 def _llm_extract(
     transcript: str, response: str
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Single bounded LLM extraction pass. Returns ``None`` if unavailable.
 
     The LLM client is lazy-imported so the plugin has no hard dependency on any
@@ -284,7 +284,7 @@ def _llm_extract(
     """
     try:
         from praisonaiagents.llm import LLM  # lazy, optional
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional backend; fall back to heuristic
         return None
 
     prompt = _LLM_PROMPT.replace("{transcript}", transcript or "").replace(
@@ -294,14 +294,14 @@ def _llm_extract(
         model = os.environ.get("PRAISONAI_FOLLOW_THROUGH_MODEL")
         client = LLM(model=model) if model else LLM()
         raw = client.get_response(prompt=prompt, temperature=0.0)
-    except Exception as exc:  # pragma: no cover - backend-specific
+    except Exception as exc:  # noqa: BLE001 # pragma: no cover - backend-specific
         logger.debug("[FOLLOW-THROUGH] LLM extraction failed: %s", exc)
         return None
 
     return _parse_llm_json(raw)
 
 
-def _parse_llm_json(raw: Any) -> Optional[List[Dict[str, Any]]]:
+def _parse_llm_json(raw: Any) -> list[dict[str, Any]] | None:
     """Best-effort parse of the model's JSON array output."""
     if not isinstance(raw, str):
         return None
@@ -312,11 +312,11 @@ def _parse_llm_json(raw: Any) -> Optional[List[Dict[str, Any]]]:
         return None
     try:
         data = json.loads(text[start : end + 1])
-    except Exception:
+    except Exception:  # noqa: BLE001 - malformed model output; treat as none
         return None
     if not isinstance(data, list):
         return None
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for item in data:
         if isinstance(item, dict):
             out.append(item)
@@ -354,7 +354,7 @@ class FollowThroughPlugin(Plugin):
             hooks=[PluginHook.AFTER_AGENT],
         )
 
-    def on_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def on_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Apply operator config (``enabled``/``threshold``/``max_pending``)."""
         if not isinstance(config, dict):
             return config
@@ -374,7 +374,7 @@ class FollowThroughPlugin(Plugin):
 
     # ------------------------------------------------------------------ hook
 
-    def after_agent(self, response: str, context: Dict[str, Any]) -> str:
+    def after_agent(self, response: str, context: dict[str, Any]) -> str:
         """Best-effort post-turn extraction + scheduling. Never mutates output.
 
         This method *always* returns ``response`` unchanged. All work is wrapped
@@ -384,13 +384,13 @@ class FollowThroughPlugin(Plugin):
             return response
         try:
             self._process_turn(response, context or {})
-        except Exception as exc:  # never let this affect the response
+        except Exception as exc:  # noqa: BLE001 - never let this affect the response
             logger.debug("[FOLLOW-THROUGH] post-turn processing failed: %s", exc)
         return response
 
     # -------------------------------------------------------------- internals
 
-    def _process_turn(self, response: str, context: Dict[str, Any]) -> None:
+    def _process_turn(self, response: str, context: dict[str, Any]) -> None:
         transcript = _extract_transcript(context, response)
         channel = context.get("channel")
         session_id = context.get("session_id") or context.get("session")
@@ -410,10 +410,10 @@ class FollowThroughPlugin(Plugin):
 
     def _normalise(
         self,
-        candidate: Dict[str, Any],
-        channel: Optional[str],
-        session_id: Optional[str],
-    ) -> Optional[Commitment]:
+        candidate: dict[str, Any],
+        channel: str | None,
+        session_id: str | None,
+    ) -> Commitment | None:
         try:
             kind = _coerce_kind(candidate.get("kind"))
             summary = str(candidate.get("summary") or "").strip()
@@ -433,12 +433,12 @@ class FollowThroughPlugin(Plugin):
                 channel=channel,
                 session_id=session_id,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best-effort; skip bad candidate
             logger.debug("[FOLLOW-THROUGH] normalise failed: %s", exc)
             return None
 
     def _schedule_followup(
-        self, commitment: Commitment, context: Dict[str, Any]
+        self, commitment: Commitment, context: dict[str, Any]
     ) -> None:
         """Schedule a single proactive check-in via the core scheduler.
 
@@ -448,7 +448,7 @@ class FollowThroughPlugin(Plugin):
         """
         try:
             from praisonaiagents.scheduler.models import DeliveryTarget
-        except Exception:
+        except Exception:  # noqa: BLE001 - scheduler optional; persist without it
             logger.debug(
                 "[FOLLOW-THROUGH] scheduler unavailable; persisted but not scheduled"
             )
@@ -459,11 +459,11 @@ class FollowThroughPlugin(Plugin):
                 channel=commitment.channel,
                 session_id=commitment.session_id,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - tolerate differing DeliveryTarget signatures
             # Older/newer signatures: fall back to a minimal construction.
             try:
                 target = DeliveryTarget(channel=commitment.channel)
-            except Exception:
+            except Exception:  # noqa: BLE001 - last-resort fallback
                 target = None
 
         message = _followup_message(commitment)
@@ -498,7 +498,7 @@ class FollowThroughPlugin(Plugin):
                 commitment.kind.value,
                 commitment.due_at,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - scheduling is best-effort
             logger.debug("[FOLLOW-THROUGH] scheduling failed: %s", exc)
 
 
@@ -512,14 +512,14 @@ def _followup_message(commitment: Commitment) -> str:
     return f"Following up as promised. ({topic})"
 
 
-def _extract_transcript(context: Dict[str, Any], response: str) -> str:
+def _extract_transcript(context: dict[str, Any], response: str) -> str:
     """Assemble a plain-text transcript from whatever the context provides."""
-    if "transcript" in context and context["transcript"]:
+    if context.get("transcript"):
         transcript = context["transcript"]
         if isinstance(transcript, str):
             return transcript
         if isinstance(transcript, list):
-            parts: List[str] = []
+            parts: list[str] = []
             for turn in transcript:
                 if isinstance(turn, dict):
                     role = turn.get("role", "")
@@ -532,13 +532,13 @@ def _extract_transcript(context: Dict[str, Any], response: str) -> str:
     return f"user: {prompt}\nassistant: {response}".strip()
 
 
-def _get_scheduler() -> Optional[Any]:
+def _get_scheduler() -> Any | None:
     """Best-effort discovery of a shared scheduler runner from core."""
     try:
         from praisonaiagents.scheduler import get_scheduler  # type: ignore
 
         return get_scheduler()
-    except Exception:
+    except Exception:  # noqa: BLE001 - scheduler discovery is optional
         return None
 
 

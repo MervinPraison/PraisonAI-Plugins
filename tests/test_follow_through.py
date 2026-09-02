@@ -11,10 +11,10 @@ plugin imports so they run without the full SDK installed. They verify:
   * extraction failures never propagate to the response path.
 """
 
+import importlib
+import logging
 import sys
 import types
-import logging
-import importlib
 
 import pytest
 
@@ -33,7 +33,6 @@ def _install_sdk_stubs():
 
     from dataclasses import dataclass, field
     from enum import Enum
-    from typing import List
 
     class PluginHook(str, Enum):
         BEFORE_AGENT = "before_agent"
@@ -45,8 +44,8 @@ def _install_sdk_stubs():
         version: str = "1.0.0"
         description: str = ""
         author: str = ""
-        hooks: List = field(default_factory=list)
-        dependencies: List = field(default_factory=list)
+        hooks: list = field(default_factory=list)
+        dependencies: list = field(default_factory=list)
 
     class Plugin:
         def on_init(self, context):
