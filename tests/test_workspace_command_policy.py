@@ -4,11 +4,10 @@ These use the installed ``praisonaiagents`` SDK (the same dependency the repo
 already requires) and drive the policy with a temporary workspace root so the
 containment logic is exercised against real ``path_safety`` resolution.
 """
-import os
 
 import pytest
+from praisonaiagents.plugins.plugin import PluginDecision, PluginHook
 
-from praisonaiagents.plugins.plugin import PluginHook, PluginDecision
 from praisonai_plugins.policies.workspace_command_policy import (
     WorkspaceCommandPolicy,
 )

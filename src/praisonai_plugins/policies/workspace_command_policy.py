@@ -22,14 +22,14 @@ from __future__ import annotations
 
 import os
 import shlex
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from praisonaiagents._logging import get_logger
 from praisonaiagents.plugins.plugin import (
     Plugin,
     PluginDecision,
-    PluginInfo,
     PluginHook,
+    PluginInfo,
 )
 
 logger = get_logger(__name__)
@@ -88,7 +88,7 @@ class WorkspaceCommandPolicy(Plugin):
         self._enabled: bool = True
         self._on_escape: str = "deny"
         self._on_parse_error: str = "deny"
-        self._workspace_root: Optional[str] = None
+        self._workspace_root: str | None = None
         self._mutating_binaries = set(_DEFAULT_MUTATING_BINARIES)
 
     @property
@@ -104,7 +104,7 @@ class WorkspaceCommandPolicy(Plugin):
             hooks=[PluginHook.BEFORE_TOOL, PluginHook.ON_PERMISSION_ASK],
         )
 
-    def on_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def on_config(self, config: dict[str, Any]) -> dict[str, Any]:
         cfg = config.get("workspace_command_policy", config) or {}
         if "enabled" in cfg:
             self._enabled = bool(cfg["enabled"])
@@ -126,8 +126,8 @@ class WorkspaceCommandPolicy(Plugin):
     # Hook entry points
     # ------------------------------------------------------------------
     def before_tool(
-        self, tool_name: str, args: Dict[str, Any]
-    ) -> Union[Dict[str, Any], "PluginDecision", None]:
+        self, tool_name: str, args: dict[str, Any]
+    ) -> dict[str, Any] | PluginDecision | None:
         if not self._enabled:
             return args
         if tool_name not in _COMMAND_TOOLS:
@@ -140,7 +140,7 @@ class WorkspaceCommandPolicy(Plugin):
             return decision
         return args
 
-    def on_permission_ask(self, target: str, reason: str) -> Optional[bool]:
+    def on_permission_ask(self, target: str, reason: str) -> bool | None:
         if not self._enabled:
             return None
         if not target:
@@ -155,7 +155,7 @@ class WorkspaceCommandPolicy(Plugin):
     # ------------------------------------------------------------------
     # Core evaluation
     # ------------------------------------------------------------------
-    def _evaluate(self, command: str) -> Optional[PluginDecision]:
+    def _evaluate(self, command: str) -> PluginDecision | None:
         """Return a deny decision if the command writes outside the workspace.
 
         Returns ``None`` when the command has no detected write targets or all
@@ -164,7 +164,7 @@ class WorkspaceCommandPolicy(Plugin):
         root = os.path.realpath(self._workspace_root or os.getcwd())
         try:
             writes = self._extract_write_targets(command)
-        except Exception as exc:  # fail closed on parse failure
+        except ValueError as exc:  # fail closed on parse failure
             logger.debug("workspace_command_policy parse error: %s", exc)
             if self._on_parse_error == "allow":
                 return None
@@ -191,7 +191,7 @@ class WorkspaceCommandPolicy(Plugin):
     # Command / target extraction
     # ------------------------------------------------------------------
     @staticmethod
-    def _extract_command(args: Dict[str, Any]) -> Optional[str]:
+    def _extract_command(args: dict[str, Any]) -> str | None:
         if not isinstance(args, dict):
             return None
         for key in _COMMAND_KEYS:
@@ -203,7 +203,7 @@ class WorkspaceCommandPolicy(Plugin):
                     return " ".join(str(v) for v in value)
         return None
 
-    def _extract_write_targets(self, command: str) -> List[str]:
+    def _extract_write_targets(self, command: str) -> list[str]:
         """Extract paths the command is expected to write to.
 
         Uses the optional ``bashlex`` parser when available to expand
@@ -211,22 +211,22 @@ class WorkspaceCommandPolicy(Plugin):
         ``shlex``-based scan. Raises on unparsable input so the caller can fail
         closed.
         """
-        targets: List[str] = []
+        targets: list[str] = []
         for segment in self._split_segments(command):
             targets.extend(self._targets_from_segment(segment))
         # De-duplicate preserving order.
         seen: set = set()
-        ordered: List[str] = []
+        ordered: list[str] = []
         for t in targets:
             if t not in seen:
                 seen.add(t)
                 ordered.append(t)
         return ordered
 
-    def _split_segments(self, command: str) -> List[str]:
+    def _split_segments(self, command: str) -> list[str]:
         """Split a command line into pipeline/separator segments."""
-        segments: List[str] = []
-        current: List[str] = []
+        segments: list[str] = []
+        current: list[str] = []
         try:
             lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
             lexer.whitespace_split = True
@@ -246,7 +246,7 @@ class WorkspaceCommandPolicy(Plugin):
             segments.append(" ".join(current))
         return segments or [command]
 
-    def _targets_from_segment(self, segment: str) -> List[str]:
+    def _targets_from_segment(self, segment: str) -> list[str]:
         try:
             tokens = shlex.split(segment)
         except ValueError as exc:
@@ -254,11 +254,11 @@ class WorkspaceCommandPolicy(Plugin):
         if not tokens:
             return []
 
-        targets: List[str] = []
+        targets: list[str] = []
 
         # Redirection targets: the token after a redirect operator.
         i = 0
-        stripped: List[str] = []
+        stripped: list[str] = []
         while i < len(tokens):
             tok = tokens[i]
             matched_op = next(
@@ -284,10 +284,8 @@ class WorkspaceCommandPolicy(Plugin):
         binary = os.path.basename(stripped[0])
         rest = stripped[1:]
 
-        if binary in self._mutating_binaries:
-            targets.extend(self._positional_paths(rest))
-        elif binary == "sed" and any(
-            a == "-i" or a.startswith("-i") for a in rest
+        if binary in self._mutating_binaries or (
+            binary == "sed" and any(a == "-i" or a.startswith("-i") for a in rest)
         ):
             targets.extend(self._positional_paths(rest))
         elif binary == "find" and any(
@@ -301,12 +299,12 @@ class WorkspaceCommandPolicy(Plugin):
         return targets
 
     @staticmethod
-    def _positional_paths(args: List[str]) -> List[str]:
+    def _positional_paths(args: list[str]) -> list[str]:
         return [a for a in args if not a.startswith("-")]
 
     @staticmethod
-    def _find_roots(args: List[str]) -> List[str]:
-        roots: List[str] = []
+    def _find_roots(args: list[str]) -> list[str]:
+        roots: list[str] = []
         for a in args:
             if a.startswith("-"):
                 break
@@ -316,18 +314,18 @@ class WorkspaceCommandPolicy(Plugin):
     # ------------------------------------------------------------------
     # Containment + preview
     # ------------------------------------------------------------------
-    def _resolve_escaping(self, writes: List[str], root: str) -> List[str]:
+    def _resolve_escaping(self, writes: list[str], root: str) -> list[str]:
         # Lazy import so core stays optional and import is cheap.
         from praisonaiagents.tools.path_safety import resolve_within_root
 
-        escaping: List[str] = []
+        escaping: list[str] = []
         for target in writes:
             if resolve_within_root(target, root) is None:
                 escaping.append(target)
         return escaping
 
     def _format_preview(
-        self, writes: List[str], escaping: List[str], root: str
+        self, writes: list[str], escaping: list[str], root: str
     ) -> str:
         lines = [
             "workspace_command_policy: command writes OUTSIDE the workspace.",
