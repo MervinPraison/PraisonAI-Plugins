@@ -93,8 +93,18 @@ class AgentFuseToolMiddleware:
                 guard_failed=True,
             )
 
+        action = getattr(decision, "action", None)
+        if action not in ("allow", "block"):
+            return self._not_executed_response(
+                request,
+                tool_call_id=tool_call_id,
+                reason_code="invalid_guard_decision",
+                policy_denied=False,
+                guard_failed=True,
+            )
+
         metadata["agentfuse_decision"] = decision
-        if decision.action == "block":
+        if action == "block":
             return self._not_executed_response(
                 request,
                 tool_call_id=tool_call_id,

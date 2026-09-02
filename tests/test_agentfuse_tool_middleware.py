@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from dhms_agentfuse import RuntimeGuard, RuntimeGuardDecision, ToolCallRequest
 from praisonaiagents import Agent
@@ -108,6 +110,32 @@ def test_adapter_evaluate_exception_fails_closed_without_dispatch():
     assert result["guard_failed"] is True
     assert result["policy_denied"] is False
     assert result["tool_call_id"] == "praison-raise-001"
+    assert result["host_execution"] == {
+        "outcome": "not_executed",
+        "handler_started": False,
+    }
+
+
+def test_unknown_decision_action_fails_closed_without_dispatch():
+    class UnknownActionGuard(RuntimeGuard):
+        """Return a decision whose action violates the AgentFuse contract."""
+
+        def evaluate(self, tool_call):
+            del tool_call
+            return SimpleNamespace(action="unexpected")
+
+    agent, _, calls = _sync_agent(UnknownActionGuard())
+
+    result = agent.execute_tool(
+        "protected_write", {"value": "synthetic-value"}, "praison-invalid-001"
+    )
+
+    assert len(calls) == 0
+    assert result["status"] == "blocked"
+    assert result["reason_code"] == "invalid_guard_decision"
+    assert result["policy_denied"] is False
+    assert result["guard_failed"] is True
+    assert result["tool_call_id"] == "praison-invalid-001"
     assert result["host_execution"] == {
         "outcome": "not_executed",
         "handler_started": False,
