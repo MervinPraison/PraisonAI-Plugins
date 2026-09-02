@@ -41,6 +41,13 @@ capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
 where = ["src"]
 include = ["praisonai_plugins", "praisonai_plugins.*"]
 
+[tool.ruff.lint]
+# Pin the rule set so a floating ruff default (which now enables UP/I/BLE/…)
+# cannot break CI repo-wide. E/F are the stable pyflakes+pycodestyle defaults.
+select = ["E", "F"]
+# Line length is a formatting preference; existing modules predate it.
+ignore = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
