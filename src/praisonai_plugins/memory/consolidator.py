@@ -39,10 +39,10 @@ from __future__ import annotations
 
 import re
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -61,7 +61,7 @@ def _load_consolidation_result() -> Any:
         from praisonaiagents.memory import ConsolidationResult
 
         return ConsolidationResult
-    except Exception:  # pragma: no cover - exercised on older SDKs / stubs
+    except Exception:  # noqa: BLE001 # pragma: no cover - older SDKs / stubs
         import math
         from dataclasses import dataclass, field
 
@@ -73,9 +73,9 @@ def _load_consolidation_result() -> Any:
             promoted: int = 0
             pruned: int = 0
             rejected: bool = False
-            reason: Optional[str] = None
-            retained_originals: Optional[int] = None
-            context: Optional[Dict[str, Any]] = field(default=None)
+            reason: str | None = None
+            retained_originals: int | None = None
+            context: dict[str, Any] | None = field(default=None)
 
             def __post_init__(self) -> None:
                 if self.context is None:
@@ -96,7 +96,7 @@ def _load_consolidation_result() -> Any:
                 if not isinstance(max_loss_fraction, (int, float)) or isinstance(
                     max_loss_fraction, bool
                 ):
-                    raise ValueError(
+                    raise ValueError(  # noqa: TRY004 — contract uses ValueError
                         "max_loss_fraction must be a real number in [0.0, 1.0]"
                     )
                 if not math.isfinite(max_loss_fraction) or not (
@@ -110,7 +110,7 @@ def _load_consolidation_result() -> Any:
         return ConsolidationResult
 
 
-def _text_of(entry: Dict[str, Any]) -> str:
+def _text_of(entry: dict[str, Any]) -> str:
     """Extract the memory text from a store entry (tolerant of key names)."""
     for key in ("text", "memory", "content", "value"):
         val = entry.get(key)
@@ -119,7 +119,7 @@ def _text_of(entry: Dict[str, Any]) -> str:
     return ""
 
 
-def _id_of(entry: Dict[str, Any]) -> Optional[str]:
+def _id_of(entry: dict[str, Any]) -> str | None:
     """Extract a stable id from a store entry, if present."""
     for key in ("id", "memory_id", "_id"):
         val = entry.get(key)
@@ -143,7 +143,7 @@ def _jaccard(a: frozenset, b: frozenset) -> float:
     return inter / len(a | b)
 
 
-def _importance(entry: Dict[str, Any]) -> float:
+def _importance(entry: dict[str, Any]) -> float:
     """Best-effort importance/quality score for an entry (default 0.0)."""
     meta = entry.get("metadata")
     if isinstance(meta, dict):
@@ -196,8 +196,8 @@ class MemoryConsolidationPlugin(Plugin):
         self._use_llm: bool = False
         self._dry_run: bool = False
 
-        self._stop_event: Optional[threading.Event] = None
-        self._thread: Optional[threading.Thread] = None
+        self._stop_event: threading.Event | None = None
+        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     @property
@@ -222,7 +222,7 @@ class MemoryConsolidationPlugin(Plugin):
             hooks=hooks,
         )
 
-    def on_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def on_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Read optional configuration before the gateway starts."""
         try:
             if "enabled" in config:
@@ -237,7 +237,7 @@ class MemoryConsolidationPlugin(Plugin):
                 self._similarity_threshold = min(1.0, max(0.0, st))
             if "promote_importance" in config:
                 self._promote_importance = float(config["promote_importance"])
-            if "curated_tag" in config and config["curated_tag"]:
+            if config.get("curated_tag"):
                 self._curated_tag = str(config["curated_tag"])
             if "use_llm" in config:
                 self._use_llm = bool(config["use_llm"])
@@ -281,8 +281,8 @@ class MemoryConsolidationPlugin(Plugin):
         if thread is not None and thread.is_alive():
             try:
                 thread.join(timeout=1.0)
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 — shutdown must never raise
+                logger.debug(f"[MEMCONSOLIDATE] scheduler join failed: {e}")
         return event
 
     def on_shutdown(self) -> None:
@@ -354,7 +354,7 @@ class MemoryConsolidationPlugin(Plugin):
 
         merged = 0
         promoted = 0
-        prune_ids: List[str] = []
+        prune_ids: list[str] = []
         retained_originals = 0
 
         for cluster in clusters:
@@ -407,13 +407,13 @@ class MemoryConsolidationPlugin(Plugin):
 
         return result
 
-    def _cluster(self, entries: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    def _cluster(self, entries: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         """Group entries into near-duplicate clusters by token similarity."""
-        token_cache: List[Tuple[Dict[str, Any], frozenset]] = [
+        token_cache: list[tuple[dict[str, Any], frozenset]] = [
             (e, _tokens(_text_of(e))) for e in entries
         ]
-        clusters: List[List[Dict[str, Any]]] = []
-        cluster_tokens: List[frozenset] = []
+        clusters: list[list[dict[str, Any]]] = []
+        cluster_tokens: list[frozenset] = []
 
         for entry, toks in token_cache:
             placed = False
@@ -427,7 +427,7 @@ class MemoryConsolidationPlugin(Plugin):
                 cluster_tokens.append(toks)
         return clusters
 
-    def _prune(self, memory: Any, prune_ids: List[str]) -> None:
+    def _prune(self, memory: Any, prune_ids: list[str]) -> None:
         """Delete merged-duplicate entries, tolerant of the memory surface."""
         if not prune_ids:
             return
@@ -447,7 +447,7 @@ class MemoryConsolidationPlugin(Plugin):
                     logger.debug(f"[MEMCONSOLIDATE] delete_memory {mid} failed: {e}")
 
     def _promote(
-        self, memory: Any, clusters: List[List[Dict[str, Any]]]
+        self, memory: Any, clusters: list[list[dict[str, Any]]]
     ) -> None:
         """Tag durable, high-value keepers into the curated tier if supported."""
         update = getattr(memory, "update_memory", None)
