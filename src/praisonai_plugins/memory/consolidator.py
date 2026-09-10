@@ -202,6 +202,14 @@ class MemoryConsolidationPlugin(Plugin):
 
     @property
     def info(self) -> PluginInfo:
+        # Reference hooks defensively so plugin discovery still succeeds on an
+        # older praisonaiagents that lacks the GATEWAY_* enum members (mirrors
+        # skill_curator), matching this plugin's older-SDK importability goal.
+        hooks = [
+            getattr(PluginHook, name)
+            for name in ("GATEWAY_START", "GATEWAY_STOP")
+            if hasattr(PluginHook, name)
+        ]
         return PluginInfo(
             name="memory_consolidation",
             version="1.0.0",
@@ -211,10 +219,7 @@ class MemoryConsolidationPlugin(Plugin):
                 "curated tier, prunes redundant entries, off the hot path."
             ),
             author="PraisonAI",
-            hooks=[
-                PluginHook.GATEWAY_START,
-                PluginHook.GATEWAY_STOP,
-            ],
+            hooks=hooks,
         )
 
     def on_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
