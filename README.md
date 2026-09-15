@@ -13,7 +13,7 @@ This repository includes examples and templates covering all **6 Plugin Types** 
 3. **Guardrails**: Validate outputs, ensure safety, intercept Prompt Injections, prevent PII escapes. (`pii_guardrail`)
 4. **Policies**: Set runtime execution contexts—for example blocking dangerous tool execution unconditionally. (`strict_policy`)
 5. **Skills**: Bundle higher-level instructions and techniques to transform how the agent "thinks". (`researcher_skill`)
-6. **Integrations**: Effortless connectors to 3rd party APIs, internal databases, or services like Slack, Jira. (`slack_integration`)
+6. **Integrations**: Effortless connectors to 3rd party APIs, internal databases, or services like Slack, Jira. (`slack_integration`, `feedo`)
 
 ---
 
