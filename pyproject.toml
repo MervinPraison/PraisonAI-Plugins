@@ -25,6 +25,7 @@ custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugi
 cli_backend_tracer = "praisonai_plugins.observability.cli_backend_tracer:CliBackendTracerPlugin"
 gateway_forensics = "praisonai_plugins.observability.gateway_forensics:GatewayForensicsPlugin"
 memory_watchdog = "praisonai_plugins.observability.memory_watchdog:MemoryWatchdogPlugin"
+memory_consolidation = "praisonai_plugins.memory.consolidator:MemoryConsolidationPlugin"
 basic_tools = "praisonai_plugins.tools.basic_tool:BasicToolPlugin"
 strict_policy = "praisonai_plugins.policies.strict_policy:StrictTypingPolicyPlugin"
 pii_guardrail = "praisonai_plugins.guardrails.pii_guardrail:PIIGuardrailPlugin"
@@ -39,6 +40,9 @@ capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["praisonai_plugins", "praisonai_plugins.*"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
