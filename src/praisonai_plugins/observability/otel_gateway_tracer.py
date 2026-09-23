@@ -38,8 +38,9 @@ inherits the ecosystem's conventions rather than inventing new ones.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator, Mapping, MutableMapping
 from contextlib import contextmanager
-from typing import Any, Iterator, Mapping, MutableMapping, Optional
+from typing import Any
 
 from praisonaiagents._logging import get_logger
 
@@ -76,14 +77,18 @@ class OtelGatewayTraceHook:
     def __init__(
         self,
         *,
-        endpoint: Optional[str] = None,
-        service_name: Optional[str] = None,
-        sample_ratio: Optional[float] = None,
+        endpoint: str | None = None,
+        service_name: str | None = None,
+        sample_ratio: float | None = None,
     ) -> None:
-        # Resolve config: explicit args win, else the standard OTel env vars.
-        self._endpoint = endpoint or os.environ.get(
-            "OTEL_EXPORTER_OTLP_ENDPOINT", ""
-        ).strip() or None
+        # Resolve config: an *explicit* endpoint arg is the exact signal URL and
+        # wins; otherwise leave it unset so ``OTLPSpanExporter`` resolves the
+        # standard OTel env vars itself. Passing the general
+        # ``OTEL_EXPORTER_OTLP_ENDPOINT`` (e.g. ``http://collector:4318``)
+        # straight in as ``endpoint=`` would bypass the exporter's own signal
+        # path handling (appending ``/v1/traces``) and override any
+        # ``OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`` -- so we don't.
+        self._endpoint = endpoint
         self._service_name = (
             service_name
             or os.environ.get("OTEL_SERVICE_NAME", "").strip()
@@ -108,6 +113,10 @@ class OtelGatewayTraceHook:
     def _init_otel(self) -> bool:
         try:
             from opentelemetry import trace
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
+            from opentelemetry.propagate import get_global_textmap
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -115,12 +124,8 @@ class OtelGatewayTraceHook:
                 ParentBased,
                 TraceIdRatioBased,
             )
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter,
-            )
-            from opentelemetry.propagate import get_global_textmap
             from opentelemetry.trace import Status, StatusCode
-        except Exception as exc:  # pragma: no cover - optional dependency
+        except Exception as exc:  # noqa: BLE001 - optional dependency
             logger.debug(
                 "OpenTelemetry not available (%s); gateway tracing is a no-op. "
                 "Install with: pip install praisonai-plugins[otel]",
@@ -139,6 +144,12 @@ class OtelGatewayTraceHook:
                 if self._endpoint
                 else OTLPSpanExporter()
             )
+            resolved_endpoint = (
+                self._endpoint
+                or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+                or "default"
+            )
             provider.add_span_processor(BatchSpanProcessor(exporter))
             self._tracer = provider.get_tracer("praisonai.gateway")
             self._propagator = get_global_textmap()
@@ -148,11 +159,11 @@ class OtelGatewayTraceHook:
             logger.info(
                 "Gateway OTLP tracing enabled (service=%s endpoint=%s ratio=%s)",
                 self._service_name,
-                self._endpoint or "default",
+                resolved_endpoint,
                 self._sample_ratio,
             )
             return True
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  # noqa: BLE001 - defensive, never break gateway
             logger.warning(
                 "Failed to initialise OpenTelemetry gateway tracer (%s); "
                 "tracing disabled.",
@@ -164,15 +175,15 @@ class OtelGatewayTraceHook:
 
     @staticmethod
     @contextmanager
-    def _null_scope() -> "Iterator[None]":
+    def _null_scope() -> Iterator[None]:
         yield None
 
     def stage(
         self,
         name: str,
         *,
-        correlation_id: "Optional[str]" = None,
-        parent_carrier: "Optional[Mapping[str, str]]" = None,
+        correlation_id: str | None = None,
+        parent_carrier: Mapping[str, str] | None = None,
         **attrs: Any,
     ) -> Any:
         """Open a span for pipeline stage ``name`` (no-op when disabled)."""
@@ -190,8 +201,8 @@ class OtelGatewayTraceHook:
         self,
         name: str,
         *,
-        correlation_id: Optional[str],
-        parent_carrier: Optional[Mapping[str, str]],
+        correlation_id: str | None,
+        parent_carrier: Mapping[str, str] | None,
         attrs: Mapping[str, Any],
     ) -> Iterator[Any]:
         # Continue an upstream trace when a W3C carrier is supplied, else start
@@ -200,7 +211,8 @@ class OtelGatewayTraceHook:
         if parent_carrier:
             try:
                 context = self._propagator.extract(dict(parent_carrier))
-            except Exception:  # pragma: no cover - defensive
+            except Exception as exc:  # noqa: BLE001 - never break the hot path
+                logger.debug("trace-context extract failed: %s", exc)
                 context = None
 
         span_cm = self._tracer.start_as_current_span(name, context=context)
@@ -216,26 +228,25 @@ class OtelGatewayTraceHook:
             try:
                 span.record_exception(exc)
                 span.set_status(self._status_cls(self._status_code.ERROR, str(exc)))
-            except Exception:  # pragma: no cover - defensive
-                pass
+            except Exception as record_exc:  # noqa: BLE001 - defensive
+                logger.debug("failed to record span exception: %s", record_exc)
             span_cm.__exit__(type(exc), exc, exc.__traceback__)
             raise
         else:
             span_cm.__exit__(None, None, None)
 
-    def inject_context(self, carrier: "MutableMapping[str, str]") -> None:
+    def inject_context(self, carrier: MutableMapping[str, str]) -> None:
         """Write the active span context into ``carrier`` (no-op when disabled)."""
         if not self._enabled or self._propagator is None:
-            return None
+            return
         try:
             self._propagator.inject(carrier)
-        except Exception:  # pragma: no cover - defensive
-            pass
-        return None
+        except Exception as exc:  # noqa: BLE001 - never break egress
+            logger.debug("trace-context inject failed: %s", exc)
 
     def extract_carrier(
-        self, carrier: "Mapping[str, str]"
-    ) -> "Optional[Mapping[str, str]]":
+        self, carrier: Mapping[str, str]
+    ) -> Mapping[str, str] | None:
         """Return a normalized parent carrier from inbound ``carrier``.
 
         The seam passes the returned mapping straight back to
