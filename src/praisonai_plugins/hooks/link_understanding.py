@@ -36,11 +36,11 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -75,17 +75,17 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _env_domains(name: str) -> List[str]:
+def _env_domains(name: str) -> list[str]:
     raw = os.environ.get(name, "")
     return [d.strip().lower() for d in raw.split(",") if d.strip()]
 
 
-def detect_urls(text: str) -> List[str]:
+def detect_urls(text: str) -> list[str]:
     """Extract deduped http(s) URLs from ``text`` preserving first-seen order."""
     if not text:
         return []
     seen: set = set()
-    urls: List[str] = []
+    urls: list[str] = []
     for match in _URL_RE.findall(text):
         url = match.rstrip(_TRAILING)
         if url and url not in seen:
@@ -94,7 +94,7 @@ def detect_urls(text: str) -> List[str]:
     return urls
 
 
-def _domain_allowed(url: str, allow_domains: List[str]) -> bool:
+def _domain_allowed(url: str, allow_domains: list[str]) -> bool:
     if not allow_domains:
         return True
     host = (urlparse(url).hostname or "").lower()
@@ -130,7 +130,7 @@ class LinkUnderstandingPlugin(Plugin):
 
     # ------------------------------------------------------------------ hook
 
-    def before_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def before_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """Enrich inbound message content with short understanding of any links.
 
         Never blocks delivery: any failure degrades to the original content.
@@ -164,7 +164,7 @@ class LinkUnderstandingPlugin(Plugin):
             )
             message["content"] = enriched
             return message
-        except Exception as exc:  # fail-soft: never block the reply
+        except Exception as exc:  # noqa: BLE001 - fail-soft: never block the reply
             logger.debug("link_understanding: skipped (%s)", exc)
             return message
 
@@ -176,12 +176,18 @@ class LinkUnderstandingPlugin(Plugin):
         try:
             from praisonaiagents.tools.url_safety import is_safe_http_url
             return bool(is_safe_http_url(url))
-        except Exception:
+        except Exception:  # noqa: BLE001 - if the guard is unavailable, fail closed
             # If the safety helper cannot be imported we cannot vouch for the
             # URL, so refuse it rather than risk an SSRF fetch.
             return False
 
-    def _understand(self, url: str) -> Optional[str]:
+    def _redirect_allowed(self, url: str) -> bool:
+        """Every redirect hop must clear *both* the SSRF guard and the operator
+        allowlist: an open redirect on an allowed host must not let us fetch a
+        destination the operator never permitted."""
+        return self._is_safe(url) and _domain_allowed(url, self.allow_domains)
+
+    def _understand(self, url: str) -> str | None:
         """Fetch + summarise one URL. Returns a "- url: title — summary" note."""
         title, body = self._fetch(url)
         if title is None and body is None:
@@ -196,7 +202,7 @@ class LinkUnderstandingPlugin(Plugin):
             return f"- {url}: {summary}"
         return None
 
-    def _fetch(self, url: str) -> Tuple[Optional[str], Optional[str]]:
+    def _fetch(self, url: str) -> tuple[str | None, str | None]:
         """Best-effort fetch chain. Returns (title, text); (None, None) on failure."""
         # 1) crawl4ai (already shipped with praisonaiagents when installed).
         try:
@@ -205,7 +211,7 @@ class LinkUnderstandingPlugin(Plugin):
                 text = self._fetch_crawl4ai(url)
                 if text:
                     return None, text
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - best-effort backend; fall through to HTTP
             pass
 
         # 2) raw HTTP via requests, else stdlib urllib.
@@ -223,14 +229,14 @@ class LinkUnderstandingPlugin(Plugin):
             extracted = trafilatura.extract(html)
             if extracted:
                 return title, extracted
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - optional extractor; fall back to raw HTML
             pass
         return title, html
 
-    def _fetch_crawl4ai(self, url: str) -> Optional[str]:
+    def _fetch_crawl4ai(self, url: str) -> str | None:
         import asyncio
 
-        async def _run() -> Optional[str]:
+        async def _run() -> str | None:
             from praisonaiagents.tools import crawl4ai  # type: ignore
             result = await crawl4ai(url)
             if isinstance(result, dict):
@@ -242,7 +248,7 @@ class LinkUnderstandingPlugin(Plugin):
         except RuntimeError:
             # Already inside a running loop (e.g. async bot). Skip -> HTTP fallback.
             return None
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort backend; degrade to HTTP fetch
             return None
 
     # Hard cap on bytes read from any single response, independent of max_chars
@@ -250,7 +256,7 @@ class LinkUnderstandingPlugin(Plugin):
     # unbounded body into this synchronous ingress hook.
     _MAX_BYTES = 1_000_000
 
-    def _fetch_http(self, url: str) -> Optional[str]:
+    def _fetch_http(self, url: str) -> str | None:
         headers = {"User-Agent": "PraisonAI-LinkUnderstanding/0.1"}
         try:
             import requests  # type: ignore
@@ -273,14 +279,14 @@ class LinkUnderstandingPlugin(Plugin):
                     if not nxt:
                         return None
                     nxt = urljoin(current, nxt)
-                    if not self._is_safe(nxt):
+                    if not self._redirect_allowed(nxt):
                         logger.debug("link_understanding: unsafe redirect target skipped")
                         return None
                     current = nxt
                     continue
                 resp.raise_for_status()
                 # Cap the streamed body before decoding.
-                chunks: List[bytes] = []
+                chunks: list[bytes] = []
                 total = 0
                 for chunk in resp.iter_content(8192):
                     if not chunk:
@@ -293,7 +299,7 @@ class LinkUnderstandingPlugin(Plugin):
                 encoding = resp.encoding or "utf-8"
                 return b"".join(chunks)[: self._MAX_BYTES].decode(encoding, "replace")
             return None
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - requests path optional; fall back to urllib
             pass
         try:
             import urllib.error
@@ -317,7 +323,7 @@ class LinkUnderstandingPlugin(Plugin):
                         if not nxt:
                             return None
                         nxt = urljoin(current, nxt)
-                        if not self._is_safe(nxt):
+                        if not self._redirect_allowed(nxt):
                             logger.debug("link_understanding: unsafe redirect target skipped")
                             return None
                         current = nxt
@@ -327,7 +333,7 @@ class LinkUnderstandingPlugin(Plugin):
                     charset = fh.headers.get_content_charset() or "utf-8"
                     return fh.read(self._MAX_BYTES).decode(charset, "replace")
             return None
-        except Exception:
+        except Exception:  # noqa: BLE001 - fail-soft: any fetch error degrades to no note
             return None
 
 

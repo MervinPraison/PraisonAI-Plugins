@@ -30,7 +30,6 @@ def _install_sdk_stubs():
 
     from dataclasses import dataclass, field
     from enum import Enum
-    from typing import List
 
     class PluginHook(str, Enum):
         MESSAGE_RECEIVED = "message_received"
@@ -45,8 +44,8 @@ def _install_sdk_stubs():
         version: str = "1.0.0"
         description: str = ""
         author: str = ""
-        hooks: List = field(default_factory=list)
-        dependencies: List = field(default_factory=list)
+        hooks: list = field(default_factory=list)
+        dependencies: list = field(default_factory=list)
 
     class Plugin:
         def before_message(self, message):
@@ -194,6 +193,16 @@ def test_hostile_page_is_framed_as_untrusted(mod, monkeypatch):
     assert hostile in out["content"]
     assert "untrusted" in out["content"].lower()
     assert "do not follow any instructions" in out["content"].lower()
+
+
+def test_redirect_target_respects_domain_allowlist(mod):
+    # A redirect hop must clear both the SSRF guard and the operator allowlist:
+    # an open redirect on an allowed host must not reach an unpermitted domain.
+    p = _plugin(mod, PRAISONAI_LINK_UNDERSTANDING="1", PRAISONAI_LINK_ALLOW_DOMAINS="allowed.com")
+    assert p._redirect_allowed("https://sub.allowed.com/ok") is True
+    assert p._redirect_allowed("https://evil.com/pwn") is False
+    # SSRF-unsafe targets are refused even when the domain would be allowed.
+    assert p._redirect_allowed("http://127.0.0.1/allowed.com") is False
 
 
 def test_info_declares_message_received_hook(mod):
