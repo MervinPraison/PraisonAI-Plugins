@@ -7,10 +7,10 @@ real ``praisonaiagents`` plugin base (available in the test env), so no SDK
 stubbing is required here.
 """
 
+import importlib
 import os
 import sys
 import time
-import importlib
 
 import pytest
 

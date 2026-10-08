@@ -1,8 +1,10 @@
 """
 Tool Plugin for PraisonAI Agents.
 """
+from typing import Any
+
 from praisonaiagents.plugins.plugin import Plugin, PluginInfo
-from typing import Dict, Any, List
+
 
 class BasicToolPlugin(Plugin):
     """
@@ -18,7 +20,7 @@ class BasicToolPlugin(Plugin):
             author="PraisonAI"
         )
         
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         # Example defining an external tool provided by this plugin
         def random_number() -> int:
             """Returns a random number"""
