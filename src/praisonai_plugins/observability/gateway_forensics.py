@@ -25,10 +25,10 @@ import platform
 import signal
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -46,7 +46,7 @@ except Exception:
     pass
 
 
-def _read_proc_rss_bytes() -> Optional[int]:
+def _read_proc_rss_bytes() -> int | None:
     """Best-effort *current* resident set size in bytes. Returns None if unavailable.
 
     Note: this deliberately does NOT use ``resource.getrusage().ru_maxrss``,
@@ -55,7 +55,7 @@ def _read_proc_rss_bytes() -> Optional[int]:
     """
     # Linux/most-Unix: /proc/self/statm reports current RSS in pages.
     try:
-        with open("/proc/self/statm", "r") as fh:
+        with open("/proc/self/statm") as fh:
             rss_pages = int(fh.read().split()[1])
         return rss_pages * _PAGE_SIZE
     except Exception:
@@ -72,7 +72,7 @@ def _read_proc_rss_bytes() -> Optional[int]:
     return None
 
 
-def _read_peak_rss_bytes() -> Optional[int]:
+def _read_peak_rss_bytes() -> int | None:
     """Best-effort *peak* RSS (high-water mark) in bytes. Returns None if unavailable."""
     try:
         import resource
@@ -88,7 +88,7 @@ def _read_peak_rss_bytes() -> Optional[int]:
     return None
 
 
-def _format_mb(num_bytes: Optional[int]) -> str:
+def _format_mb(num_bytes: int | None) -> str:
     if num_bytes is None:
         return "unknown"
     return f"{num_bytes / (1024 * 1024):.1f}MB"
@@ -104,10 +104,10 @@ def _load_average() -> str:
     return "n/a"
 
 
-def _tracer_pid() -> Optional[int]:
+def _tracer_pid() -> int | None:
     """Detect an attached debugger/tracer via /proc/self/status (Linux only)."""
     try:
-        with open("/proc/self/status", "r") as fh:
+        with open("/proc/self/status") as fh:
             for line in fh:
                 if line.startswith("TracerPid:"):
                     return int(line.split(":", 1)[1].strip())
@@ -121,7 +121,7 @@ def _parent_info(ppid: int) -> str:
     name = "unknown"
     cmdline = ""
     try:
-        with open(f"/proc/{ppid}/comm", "r") as fh:
+        with open(f"/proc/{ppid}/comm") as fh:
             name = fh.read().strip() or name
     except Exception:
         pass
@@ -158,11 +158,11 @@ class GatewayForensicsPlugin(Plugin):
 
     def __init__(self) -> None:
         self._start_time: float = time.time()
-        self._baseline_rss: Optional[int] = None
-        self._monitor_thread: Optional[threading.Thread] = None
+        self._baseline_rss: int | None = None
+        self._monitor_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._signals_installed = False
-        self._prev_handlers: Dict[int, Any] = {}
+        self._prev_handlers: dict[int, Any] = {}
 
     @property
     def info(self) -> PluginInfo:

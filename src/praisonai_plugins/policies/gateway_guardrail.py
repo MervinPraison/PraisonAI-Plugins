@@ -41,16 +41,16 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
+from praisonaiagents._logging import get_logger
 from praisonaiagents.plugins.plugin import (
     Plugin,
-    PluginInfo,
-    PluginHook,
-    PluginType,
     PluginDecision,
+    PluginHook,
+    PluginInfo,
+    PluginType,
 )
-from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -61,7 +61,7 @@ _PUBLIC_CHANNEL_TYPES = frozenset({"public", "channel", "group", "public_channel
 
 # Baseline redaction patterns applied on every outbound payload. Kept
 # conservative and deterministic (no network, no ML) so the hot path stays fast.
-_BASE_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
+_BASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # US Social Security Number: 123-45-6789
     ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
     # Email address
@@ -78,7 +78,7 @@ _BASE_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 )
 
 # Extra patterns applied only on public channels (stricter than DMs).
-_PUBLIC_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
+_PUBLIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # E.164-ish phone numbers
     ("phone", re.compile(r"\b\+?\d[\d ().-]{7,}\d\b")),
 )
@@ -133,8 +133,8 @@ class GatewayGuardrailPlugin(Plugin):
     # ------------------------------------------------------------- inbound
 
     def before_message(
-        self, message: Dict[str, Any]
-    ) -> Union[Dict[str, Any], PluginDecision, None]:
+        self, message: dict[str, Any]
+    ) -> dict[str, Any] | PluginDecision | None:
         """Admit / filter an inbound message. Returns a deny decision or None."""
         sender = str(message.get("sender_id", "") or "").lower()
         content = message.get("content", "") or ""
@@ -169,7 +169,7 @@ class GatewayGuardrailPlugin(Plugin):
 
     # ------------------------------------------------------------ outbound
 
-    def after_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    def after_message(self, message: dict[str, Any]) -> dict[str, Any]:
         """Redact the FINAL outbound channel payload, per channel."""
         content = message.get("content", "")
         if not content:
@@ -192,7 +192,7 @@ class GatewayGuardrailPlugin(Plugin):
 
     def _redact(self, text: str, channel_type: str = "") -> str:
         """Apply baseline (and, on public channels, stricter) redaction."""
-        patterns: List[Tuple[str, "re.Pattern[str]"]] = list(_BASE_PATTERNS)
+        patterns: list[tuple[str, re.Pattern[str]]] = list(_BASE_PATTERNS)
         if channel_type in _PUBLIC_CHANNEL_TYPES:
             patterns += list(_PUBLIC_PATTERNS)
 
@@ -203,7 +203,7 @@ class GatewayGuardrailPlugin(Plugin):
 
     # ----------------------------------------------------------- guardrail
 
-    def as_guardrail(self) -> Optional[Any]:
+    def as_guardrail(self) -> Any | None:
         """Expose the same redaction as a ``GuardrailProtocol`` object.
 
         Lets a ``GUARDRAIL`` consumer reuse outbound redaction via
@@ -219,15 +219,15 @@ class _GatewayRedactionGuardrail:
     def __init__(self, plugin: GatewayGuardrailPlugin) -> None:
         self._plugin = plugin
 
-    def validate_input(self, content: str, **kwargs: Any) -> Tuple[bool, str]:
+    def validate_input(self, content: str, **kwargs: Any) -> tuple[bool, str]:
         # Inbound text is admitted/redacted; never reject here (fail-open on text).
         return True, self._plugin._redact(content or "")
 
-    def validate_output(self, content: str, **kwargs: Any) -> Tuple[bool, str]:
+    def validate_output(self, content: str, **kwargs: Any) -> tuple[bool, str]:
         channel_type = str(kwargs.get("channel_type", "") or "").lower()
         return True, self._plugin._redact(content or "", channel_type=channel_type)
 
-    def validate_tool_result(self, tool_name: str, result: Any, **kwargs: Any) -> Tuple[bool, Any]:
+    def validate_tool_result(self, tool_name: str, result: Any, **kwargs: Any) -> tuple[bool, Any]:
         if isinstance(result, str):
             return True, self._plugin._redact(result)
         return True, result

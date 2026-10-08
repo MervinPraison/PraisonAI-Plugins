@@ -1,8 +1,10 @@
 """
 Skills Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
-from typing import Dict, Any
+from typing import Any
+
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
+
 
 class ResearcherSkillPlugin(Plugin):
     """
@@ -19,7 +21,7 @@ class ResearcherSkillPlugin(Plugin):
             hooks=[PluginHook.BEFORE_AGENT],
         )
         
-    def before_agent(self, prompt: str, context: Dict[str, Any]) -> str:
+    def before_agent(self, prompt: str, context: dict[str, Any]) -> str:
         # Inject standard research protocol instructions into prompt
         research_directives = "\n[SKILL: Focus solely on factual information, cite sources.]\n"
         return prompt + research_directives
