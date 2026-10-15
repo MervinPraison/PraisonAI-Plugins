@@ -213,6 +213,9 @@ jobs:
               'Review Context: ' + comments.data.length + ' total comments, ' +
               (reviews.coderabbit.length + reviews.qodo.length + reviews.gemini.length + reviews.copilot.length + reviews.greptile.length) + ' bot reviews.\n\n' +
               phases;
+            // Never hand fork code to Claude automatically; a maintainer can still @claude.
+            const { data: headPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+            if (headPr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) { core.info(`PR #${pr} is a fork: no automatic @claude`); return; }
             await github.rest.issues.createComment({issue_number: pr, owner: context.repo.owner, repo: context.repo.repo, body: claudeBody});
             console.log('Claude fallback triggered on PR #' + pr + ' with ' + reviewSummary);
 
@@ -339,6 +342,9 @@ jobs:
             const pr = parseInt(process.env.PR_NUMBER, 10);
             const scope = process.env.CLAUDE_UI_SCOPE;
             const phases = process.env.CLAUDE_FINAL_PHASES_DETAILED;
+            // Never hand fork code to Claude automatically; a maintainer can still @claude.
+            const { data: headPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+            if (headPr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) { core.info(`PR #${pr} is a fork: no automatic @claude`); return; }
             await github.rest.issues.createComment({
               issue_number: pr,
               owner: context.repo.owner,
@@ -459,6 +465,9 @@ jobs:
             const pr = parseInt(process.env.PR_NUMBER, 10);
             const scope = process.env.CLAUDE_UI_SCOPE;
             const phases = process.env.CLAUDE_FINAL_PHASES_DETAILED;
+            // Never hand fork code to Claude automatically; a maintainer can still @claude.
+            const { data: headPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+            if (headPr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) { core.info(`PR #${pr} is a fork: no automatic @claude`); return; }
             await github.rest.issues.createComment({
               issue_number: pr,
               owner: context.repo.owner,
@@ -512,6 +521,9 @@ jobs:
           script: |
             const scope = process.env.CLAUDE_UI_SCOPE;
             const phases = process.env.CLAUDE_FINAL_PHASES_DETAILED;
+            // Never hand fork code to Claude automatically; a maintainer can still @claude.
+            const { data: headPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: context.issue.number });
+            if (headPr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) { core.info(`PR #${context.issue.number} is a fork: no automatic @claude`); return; }
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -718,6 +730,9 @@ jobs:
               console.log('Claude already triggered on PR #' + pr);
               return;
             }
+            // Never hand fork code to Claude automatically; a maintainer can still @claude.
+            const { data: headPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+            if (headPr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) { core.info(`PR #${pr} is a fork: no automatic @claude`); return; }
             await github.rest.issues.createComment({
               issue_number: pr,
               owner: context.repo.owner,
