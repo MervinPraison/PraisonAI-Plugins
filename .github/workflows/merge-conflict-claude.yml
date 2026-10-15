@@ -114,7 +114,7 @@ jobs:
 
               if (status !== 'DIRTY') return { skipped: true, reason: 'not dirty' };
               if (isDraft) return { skipped: true, reason: 'draft' };
-              if (headRepo && headRepo !== baseRepo) return { skipped: true, reason: 'fork' };
+              if (headRepo !== baseRepo) return { skipped: true, reason: 'fork PR' };
 
               const { data: comments } = await github.rest.issues.listComments({
                 owner,
