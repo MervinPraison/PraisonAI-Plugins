@@ -38,15 +38,15 @@ gateway hot path or shutdown.
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
 
-def _idle_days(skill: Any) -> Optional[float]:
+def _idle_days(skill: Any) -> float | None:
     """Return days since a skill was last used (or created), or None.
 
     Prefers the core-provided ``idle_days`` helper on ``SkillProperties`` and
@@ -74,8 +74,8 @@ class SkillCuratorPlugin(Plugin):
         self._min_use_count: int = 0
         self._dry_run: bool = False
         self._manager: Any = manager
-        self._stop_event: Optional[threading.Event] = None
-        self._thread: Optional[threading.Thread] = None
+        self._stop_event: threading.Event | None = None
+        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     @property
@@ -99,7 +99,7 @@ class SkillCuratorPlugin(Plugin):
             hooks=hooks,
         )
 
-    def on_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def on_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Read optional configuration before the gateway starts."""
         try:
             if "interval_hours" in config:
@@ -193,7 +193,7 @@ class SkillCuratorPlugin(Plugin):
         except (TypeError, ValueError):
             return False
 
-    def sweep(self, manager: Any = None) -> Dict[str, Any]:
+    def sweep(self, manager: Any = None) -> dict[str, Any]:
         """Run a single curation sweep. Returns a summary dict.
 
         Only ``agent_created`` skills are eligible; user/bundled/hub skills
@@ -202,8 +202,8 @@ class SkillCuratorPlugin(Plugin):
         ``SkillManager.archive_skill``.
         """
         manager = manager or self._get_manager()
-        archived: List[str] = []
-        skipped_pinned: List[str] = []
+        archived: list[str] = []
+        skipped_pinned: list[str] = []
         scanned = 0
         if manager is None:
             return {"scanned": 0, "archived": archived, "skipped_pinned": skipped_pinned}
@@ -267,7 +267,7 @@ class SkillCuratorPlugin(Plugin):
             "skipped_pinned": skipped_pinned,
         }
 
-    def _propose_consolidation(self, manager: Any, skills: List[Any]) -> None:
+    def _propose_consolidation(self, manager: Any, skills: list[Any]) -> None:
         """Opt-in, dry-run-by-default: report overlapping narrow skills.
 
         Deliberately non-mutating: groups agent-created skills that share a
@@ -275,7 +275,7 @@ class SkillCuratorPlugin(Plugin):
         act on. Opinionated LLM-driven merging is intentionally left out of the
         default path to respect the protocol-driven-core philosophy.
         """
-        groups: Dict[str, List[str]] = {}
+        groups: dict[str, list[str]] = {}
         for skill in skills:
             props = getattr(skill, "properties", skill)
             if not getattr(props, "agent_created", False):

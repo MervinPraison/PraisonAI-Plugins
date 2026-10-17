@@ -1,9 +1,10 @@
 """
 Custom Tracer Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
+from typing import Any
+
 from praisonaiagents._logging import get_logger
-from typing import Dict, Any, List
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -25,11 +26,11 @@ class CustomTracerPlugin(Plugin):
             ]
         )
         
-    def before_llm(self, messages: List[Dict], params: Dict[str, Any]) -> tuple:
+    def before_llm(self, messages: list[dict], params: dict[str, Any]) -> tuple:
         logger.info(f"[Trace] Sending {len(messages)} messages to LLM model {params.get('model', 'unknown')}")
         return messages, params
         
-    def after_llm(self, response: str, usage: Dict[str, Any]) -> str:
+    def after_llm(self, response: str, usage: dict[str, Any]) -> str:
         tokens = usage.get('total_tokens', 0) if usage else 0
         logger.info(f"[Trace] LLM responded. Tokens used: {tokens}")
         return response

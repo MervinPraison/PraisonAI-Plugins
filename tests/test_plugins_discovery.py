@@ -1,5 +1,6 @@
-from praisonaiagents.plugins.manager import get_plugin_manager
 from praisonaiagents import Agent
+from praisonaiagents.plugins.manager import get_plugin_manager
+
 
 def main():
     manager = get_plugin_manager()

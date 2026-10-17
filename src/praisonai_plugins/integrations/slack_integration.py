@@ -1,9 +1,10 @@
 """
 Integration Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
+from typing import Any
+
 from praisonaiagents._logging import get_logger
-from typing import Dict, Any
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -22,10 +23,10 @@ class SlackIntegrationPlugin(Plugin):
             hooks=[PluginHook.ON_INIT, PluginHook.AFTER_AGENT],
         )
 
-    def on_init(self, context: Dict[str, Any]) -> None:
+    def on_init(self, context: dict[str, Any]) -> None:
         logger.info("[INTEGRATION] Slack integration initialized.")
         
-    def after_agent(self, response: str, context: Dict[str, Any]) -> str:
+    def after_agent(self, response: str, context: dict[str, Any]) -> str:
         # Example: Push to a slack channel
         # slack_client.post_message(channel="#agent-updates", text=response)
         return response

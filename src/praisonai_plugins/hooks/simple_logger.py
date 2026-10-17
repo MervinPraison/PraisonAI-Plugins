@@ -1,9 +1,10 @@
 """
 Simple Logger Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
+from typing import Any
+
 from praisonaiagents._logging import get_logger
-from typing import Dict, Any
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -28,15 +29,15 @@ class SimpleLoggerPlugin(Plugin):
             ]
         )
         
-    def before_agent(self, prompt: str, context: Dict[str, Any]) -> str:
+    def before_agent(self, prompt: str, context: dict[str, Any]) -> str:
         logger.info(f"Agent starting with prompt length: {len(prompt)}")
         return prompt
         
-    def after_agent(self, response: str, context: Dict[str, Any]) -> str:
+    def after_agent(self, response: str, context: dict[str, Any]) -> str:
         logger.info(f"Agent finished. Response length: {len(response)}")
         return response
         
-    def before_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    def before_tool(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         logger.info(f"Tool executing: {tool_name} with args: {args}")
         return args
         

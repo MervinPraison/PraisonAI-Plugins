@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
-from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -40,7 +40,7 @@ class CliBackendTracerPlugin(Plugin):
             hooks=hooks,
         )
 
-    def cli_backend_execute(self, context: Dict[str, Any]) -> None:
+    def cli_backend_execute(self, context: dict[str, Any]) -> None:
         if not _tracing_enabled():
             return
         logger.info(

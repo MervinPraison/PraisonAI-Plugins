@@ -1,8 +1,9 @@
 """
 Policy Plugin for PraisonAI Agents.
 """
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
-from typing import Optional
+
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
+
 
 class StrictTypingPolicyPlugin(Plugin):
     """
@@ -19,7 +20,7 @@ class StrictTypingPolicyPlugin(Plugin):
             hooks=[PluginHook.ON_PERMISSION_ASK],
         )
         
-    def on_permission_ask(self, target: str, reason: str) -> Optional[bool]:
+    def on_permission_ask(self, target: str, reason: str) -> bool | None:
         """Auto-deny highly destructive targets based on policy."""
         if "rm -rf" in target:
             return False

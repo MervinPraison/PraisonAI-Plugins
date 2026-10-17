@@ -1,11 +1,12 @@
 """Unit tests for Capsule sandbox plugin backend."""
 
 import asyncio
-import pytest
 from unittest.mock import Mock, patch
 
-from praisonai_plugins.sandbox.capsule import CapsuleSandbox
+import pytest
 from praisonaiagents.sandbox import SandboxConfig, SandboxStatus
+
+from praisonai_plugins.sandbox.capsule import CapsuleSandbox
 
 
 def _capsule_config():
