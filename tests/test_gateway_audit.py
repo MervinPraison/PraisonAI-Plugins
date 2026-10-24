@@ -86,3 +86,59 @@ def test_wires_through_sdk_plugin_bridge(plugin):
         assert registry.has_hooks(event)
     # Conversation hooks stay gated until the operator grants allow_conversation.
     assert not registry.has_hooks(HookEvent.MESSAGE_RECEIVED)
+
+
+def test_granted_message_events_dispatch_through_bridge(plugin):
+    from praisonaiagents.hooks.events import MessageReceivedInput, MessageUndeliveredInput
+    from praisonaiagents.hooks.registry import HookRegistry
+    from praisonaiagents.hooks.types import HookEvent
+    from praisonaiagents.plugins.manager import PluginManager
+
+    manager = PluginManager()
+    manager.set_plugin_options({"gateway_audit": {"allow_conversation": True}})
+    assert manager.register(plugin)
+    registry = HookRegistry()
+    manager.wire_into_hook_registry(registry)
+
+    common = {"cwd": "/", "timestamp": "0", "session_id": "s9"}
+    inbound = MessageReceivedInput(event_name="message_received", platform="discord",
+                                   content="private text", sender_id="carol",
+                                   channel_id="c9", message_id="m9", **common)
+    failed = MessageUndeliveredInput(event_name="message_undelivered", platform="discord",
+                                     content="private reply", channel_id="c9",
+                                     error="forbidden", **common)
+    for event, data in ((HookEvent.MESSAGE_RECEIVED, inbound),
+                        (HookEvent.MESSAGE_UNDELIVERED, failed)):
+        hooks = registry.get_hooks(event)
+        assert len(hooks) == 1
+        hooks[0].func(data)
+
+    events = plugin.query(session_id="s9")
+    assert [e["kind"] for e in events] == ["message_undelivered", "message_received"]
+    assert events[1]["sender_id"] == "carol"
+    assert events[0]["detail"]["error"] == "forbidden"
+    assert "private" not in str(events)
+
+
+def test_failed_commit_rolls_back_and_warns_once(plugin, monkeypatch):
+    plugin.record("tool_call", detail={"tool": "warmup"})
+    real = plugin._conn
+    warnings = []
+    monkeypatch.setattr(audit_mod.logger, "warning", lambda msg, *a, **k: warnings.append(msg))
+
+    class _FailingCommit:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def commit(self):
+            raise audit_mod.sqlite3.OperationalError("database is locked")
+
+    plugin._conn = _FailingCommit()
+    plugin.record("tool_call", detail={"tool": "lost1"})
+    plugin.record("tool_call", detail={"tool": "lost2"})
+    assert len(warnings) == 1
+    assert not real.in_transaction  # write lock released
+
+    plugin._conn = real
+    plugin.record("tool_call", detail={"tool": "after"})
+    assert [e["detail"]["tool"] for e in plugin.query()] == ["after", "warmup"]

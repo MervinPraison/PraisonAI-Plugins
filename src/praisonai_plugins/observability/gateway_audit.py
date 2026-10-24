@@ -86,6 +86,7 @@ class GatewayAuditPlugin(Plugin):
         self._lock = threading.Lock()
         self._conn: Optional[sqlite3.Connection] = None
         self._inserts = 0
+        self._warned = False
 
     @property
     def info(self) -> PluginInfo:
@@ -137,8 +138,8 @@ class GatewayAuditPlugin(Plugin):
                detail: Optional[Dict[str, Any]] = None) -> None:
         """Append one event. Never raises -- auditing must not break a turn."""
         fields = fields or {}
-        try:
-            with self._lock:
+        with self._lock:
+            try:
                 conn = self._connect()
                 conn.execute(
                     "INSERT INTO audit_events (ts, kind, platform, channel_id, sender_id,"
@@ -151,8 +152,19 @@ class GatewayAuditPlugin(Plugin):
                 if self._inserts % _PRUNE_EVERY == 0:
                     self._prune(conn)
                 conn.commit()
-        except Exception as exc:
-            logger.debug(f"gateway_audit: failed to record {kind}: {exc}")
+            except Exception as exc:
+                # Roll back so a failed write never leaves the DB write-locked.
+                if self._conn is not None:
+                    try:
+                        self._conn.rollback()
+                    except Exception:
+                        pass
+                if not self._warned:
+                    self._warned = True
+                    logger.warning(f"gateway_audit: audit trail write failed ({exc}); "
+                                   "further failures are logged at debug level")
+                else:
+                    logger.debug(f"gateway_audit: failed to record {kind}: {exc}")
 
     def query(self, *, kind: Optional[str] = None, platform: Optional[str] = None,
               channel_id: Optional[str] = None, sender_id: Optional[str] = None,
