@@ -24,15 +24,16 @@ Query from Python::
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
 from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
@@ -78,13 +79,13 @@ def _retention_days() -> float:
 class GatewayAuditPlugin(Plugin):
     """Durable, metadata-only activity audit trail for gateways and bots."""
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self._db_path = os.path.expanduser(
             db_path or os.environ.get("PRAISONAI_AUDIT_DB") or _DEFAULT_DB
         )
         self._retention_s = _retention_days() * 86400
         self._lock = threading.Lock()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._inserts = 0
         self._warned = False
 
@@ -101,19 +102,19 @@ class GatewayAuditPlugin(Plugin):
     # ------------------------------------------------------------------ hooks
     # Every hook returns None so the plugin never rewrites or blocks anything.
 
-    def before_message(self, message: Dict[str, Any]) -> None:
+    def before_message(self, message: dict[str, Any]) -> None:
         self._record_message("message_received", message)
 
-    def message_sent(self, message: Dict[str, Any]) -> None:
+    def message_sent(self, message: dict[str, Any]) -> None:
         self._record_message("message_sent", message)
 
-    def message_undelivered(self, message: Dict[str, Any]) -> None:
+    def message_undelivered(self, message: dict[str, Any]) -> None:
         self._record_message("message_undelivered", message, {
             "error": str(message.get("error", ""))[:200],
             "notice_delivered": bool(message.get("notice_delivered", False)),
         })
 
-    def before_tool(self, tool_name: str, args: Dict[str, Any]) -> None:
+    def before_tool(self, tool_name: str, args: dict[str, Any]) -> None:
         self.record("tool_call", detail={"tool": tool_name})
 
     def after_tool(self, tool_name: str, result: Any) -> None:
@@ -123,7 +124,7 @@ class GatewayAuditPlugin(Plugin):
         outcome = "error" if failed else "ok"
         self.record("tool_result", detail={"tool": tool_name, "outcome": outcome})
 
-    def on_error(self, error_type: str, error_message: str, context: Dict[str, Any]) -> None:
+    def on_error(self, error_type: str, error_message: str, context: dict[str, Any]) -> None:
         self.record("error", detail={"type": error_type})
 
     def on_shutdown(self) -> None:
@@ -134,8 +135,8 @@ class GatewayAuditPlugin(Plugin):
 
     # ---------------------------------------------------------------- public
 
-    def record(self, kind: str, fields: Optional[Dict[str, Any]] = None,
-               detail: Optional[Dict[str, Any]] = None) -> None:
+    def record(self, kind: str, fields: dict[str, Any] | None = None,
+               detail: dict[str, Any] | None = None) -> None:
         """Append one event. Never raises -- auditing must not break a turn."""
         fields = fields or {}
         with self._lock:
@@ -152,13 +153,11 @@ class GatewayAuditPlugin(Plugin):
                 if self._inserts % _PRUNE_EVERY == 0:
                     self._prune(conn)
                 conn.commit()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - auditing must never break a turn
                 # Roll back so a failed write never leaves the DB write-locked.
                 if self._conn is not None:
-                    try:
+                    with contextlib.suppress(sqlite3.Error):
                         self._conn.rollback()
-                    except Exception:
-                        pass
                 if not self._warned:
                     self._warned = True
                     logger.warning(f"gateway_audit: audit trail write failed ({exc}); "
@@ -166,15 +165,15 @@ class GatewayAuditPlugin(Plugin):
                 else:
                     logger.debug(f"gateway_audit: failed to record {kind}: {exc}")
 
-    def query(self, *, kind: Optional[str] = None, platform: Optional[str] = None,
-              channel_id: Optional[str] = None, sender_id: Optional[str] = None,
-              session_id: Optional[str] = None, since: Optional[float] = None,
-              limit: int = 100) -> List[Dict[str, Any]]:
+    def query(self, *, kind: str | None = None, platform: str | None = None,
+              channel_id: str | None = None, sender_id: str | None = None,
+              session_id: str | None = None, since: float | None = None,
+              limit: int = 100) -> list[dict[str, Any]]:
         """Return matching events, newest first. ``since`` is a Unix timestamp."""
         filters = {"kind": kind, "platform": platform, "channel_id": channel_id,
                    "sender_id": sender_id, "session_id": session_id}
         clauses = [f"{col} = ?" for col, val in filters.items() if val is not None]
-        params: List[Any] = [val for val in filters.values() if val is not None]
+        params: list[Any] = [val for val in filters.values() if val is not None]
         if since is not None:
             clauses.append("ts >= ?")
             params.append(since)
@@ -193,8 +192,8 @@ class GatewayAuditPlugin(Plugin):
 
     # -------------------------------------------------------------- internals
 
-    def _record_message(self, kind: str, message: Dict[str, Any],
-                        detail: Optional[Dict[str, Any]] = None) -> None:
+    def _record_message(self, kind: str, message: dict[str, Any],
+                        detail: dict[str, Any] | None = None) -> None:
         fields = {k: str(message[k]) for k in _MESSAGE_FIELDS if message.get(k) is not None}
         self.record(kind, fields, detail)
 

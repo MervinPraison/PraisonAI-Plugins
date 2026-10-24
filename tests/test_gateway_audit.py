@@ -89,7 +89,10 @@ def test_wires_through_sdk_plugin_bridge(plugin):
 
 
 def test_granted_message_events_dispatch_through_bridge(plugin):
-    from praisonaiagents.hooks.events import MessageReceivedInput, MessageUndeliveredInput
+    from praisonaiagents.hooks.events import (
+        MessageReceivedInput,
+        MessageUndeliveredInput,
+    )
     from praisonaiagents.hooks.registry import HookRegistry
     from praisonaiagents.hooks.types import HookEvent
     from praisonaiagents.plugins.manager import PluginManager
