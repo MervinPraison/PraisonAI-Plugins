@@ -122,6 +122,27 @@ result = manager.run_code("print('hello')", language="python")
 
 ---
 
+## Gateway Activity Audit (`gateway_audit`)
+
+A durable record of gateway activity that survives restarts: inbound message, tool call/result, outbound delivery, undeliverable reply, and error. It only stores metadata (platform, channel, sender, session, message id, tool name, outcome) — never message bodies, tool arguments or tool outputs. Data goes to SQLite at `~/.praisonai/gateway_audit.db` (`PRAISONAI_AUDIT_DB`), and rows older than 30 days are pruned (`PRAISONAI_AUDIT_RETENTION_DAYS`).
+
+Message events are conversation hooks, so the operator must grant them:
+
+```yaml
+plugins:
+  gateway_audit:
+    allow_conversation: true
+```
+
+```python
+import time
+from praisonai_plugins.observability.gateway_audit import GatewayAuditPlugin
+
+GatewayAuditPlugin().query(platform="telegram", sender_id="alice", since=time.time() - 3600)
+```
+
+---
+
 ## The PraisonAI Protocol Philosophy
 
 Built with developers in mind, PraisonAI's architectural design features:
