@@ -32,6 +32,7 @@ researcher_skill = "praisonai_plugins.skills.researcher_skill:ResearcherSkillPlu
 skill_curator = "praisonai_plugins.skills.curator:SkillCuratorPlugin"
 slack_integration = "praisonai_plugins.integrations.slack_integration:SlackIntegrationPlugin"
 perseus_vault = "praisonai_plugins.integrations.perseus_vault:PerseusVaultPlugin"
+feedo = "praisonai_plugins.integrations.feedo:FeedoPlugin"
 
 [project.entry-points."praisonai.sandbox"]
 capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
