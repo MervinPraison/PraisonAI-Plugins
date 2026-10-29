@@ -21,6 +21,7 @@ dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 
 [project.entry-points."praisonai.plugins"]
 simple_logger = "praisonai_plugins.hooks.simple_logger:SimpleLoggerPlugin"
+follow_through = "praisonai_plugins.hooks.follow_through:FollowThroughPlugin"
 custom_tracer = "praisonai_plugins.observability.custom_tracer:CustomTracerPlugin"
 cli_backend_tracer = "praisonai_plugins.observability.cli_backend_tracer:CliBackendTracerPlugin"
 gateway_forensics = "praisonai_plugins.observability.gateway_forensics:GatewayForensicsPlugin"
@@ -39,6 +40,17 @@ capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["praisonai_plugins", "praisonai_plugins.*"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# Pin the rule set so a floating ruff default (a newer release now enables
+# UP/I/BLE/… by default) cannot silently break CI repo-wide on pre-existing,
+# unrelated modules. E/F are the stable pyflakes + pycodestyle correctness set.
+select = ["E", "F"]
+# Line length is a formatting preference; existing modules predate it.
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
