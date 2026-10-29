@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from praisonaiagents.sandbox import ResourceLimits, SandboxResult, SandboxStatus
 
@@ -26,7 +26,7 @@ _INSTALL_HINT = "pip install praisonai-plugins[capsule]"
 class CapsuleSandbox:
     """Capsule-based sandbox for lightweight WebAssembly code execution."""
 
-    def __init__(self, config: Optional[Any] = None, timeout: int = 60):
+    def __init__(self, config: Any | None = None, timeout: int = 60):
         self.config = config
         self.timeout = getattr(config, "timeout", timeout) if config is not None else timeout
         self._sandbox = None
@@ -83,9 +83,9 @@ class CapsuleSandbox:
         self,
         code: str,
         language: str = "python",
-        limits: Optional[ResourceLimits] = None,
-        env: Optional[Dict[str, str]] = None,
-        working_dir: Optional[str] = None,
+        limits: ResourceLimits | None = None,
+        env: dict[str, str] | None = None,
+        working_dir: str | None = None,
     ) -> SandboxResult:
         if not self._is_running:
             await self.start()
@@ -156,7 +156,7 @@ class CapsuleSandbox:
                 metadata={"platform": "capsule", "language": language},
             )
 
-    def _run_code(self, code: str, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    def _run_code(self, code: str, env: dict[str, str] | None = None) -> dict[str, Any]:
         sandbox = self._sandbox
         if sandbox is None:
             raise RuntimeError("Capsule sandbox is not running")
@@ -179,16 +179,16 @@ class CapsuleSandbox:
     async def execute_file(
         self,
         file_path: str,
-        args: Optional[List[str]] = None,
-        limits: Optional[ResourceLimits] = None,
-        env: Optional[Dict[str, str]] = None,
+        args: list[str] | None = None,
+        limits: ResourceLimits | None = None,
+        env: dict[str, str] | None = None,
     ) -> SandboxResult:
         started_at = time.time()
         try:
             loop = asyncio.get_running_loop()
 
             def _read_file() -> str:
-                with open(file_path, "r", encoding="utf-8") as fh:
+                with open(file_path, encoding="utf-8") as fh:
                     return fh.read()
 
             content = await loop.run_in_executor(None, _read_file)
@@ -210,10 +210,10 @@ class CapsuleSandbox:
 
     async def run_command(
         self,
-        command: Union[str, List[str]],
-        limits: Optional[ResourceLimits] = None,
-        env: Optional[Dict[str, str]] = None,
-        working_dir: Optional[str] = None,
+        command: str | list[str],
+        limits: ResourceLimits | None = None,
+        env: dict[str, str] | None = None,
+        working_dir: str | None = None,
     ) -> SandboxResult:
         now = time.time()
         return SandboxResult(
@@ -226,19 +226,19 @@ class CapsuleSandbox:
             metadata={"platform": "capsule"},
         )
 
-    async def write_file(self, path: str, content: Union[str, bytes]) -> bool:
+    async def write_file(self, path: str, content: str | bytes) -> bool:
         logger.warning("Capsule sandbox write_file is not supported for Wasm isolation")
         return False
 
-    async def read_file(self, path: str) -> Optional[Union[str, bytes]]:
+    async def read_file(self, path: str) -> str | bytes | None:
         logger.warning("Capsule sandbox read_file is not supported for Wasm isolation")
         return None
 
-    async def list_files(self, path: str = "/") -> List[str]:
+    async def list_files(self, path: str = "/") -> list[str]:
         logger.warning("Capsule sandbox list_files is not supported for Wasm isolation")
         return []
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         return {
             "available": self.is_available,
             "type": self.sandbox_type,

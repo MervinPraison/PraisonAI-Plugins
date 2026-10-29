@@ -21,17 +21,18 @@ gracefully (optional ``psutil``) on platforms that lack it. The daemon thread is
 fully non-blocking and never delays shutdown.
 """
 
-from praisonaiagents.plugins.plugin import Plugin, PluginInfo, PluginHook
-from praisonaiagents._logging import get_logger
-from typing import Any, Dict, Optional
 import gc
 import sys
 import threading
+from typing import Any
+
+from praisonaiagents._logging import get_logger
+from praisonaiagents.plugins.plugin import Plugin, PluginHook, PluginInfo
 
 logger = get_logger(__name__)
 
 
-def _read_rss_mb() -> Optional[float]:
+def _read_rss_mb() -> float | None:
     """Return the process resident set size in megabytes, or None if unknown.
 
     Tries ``resource.getrusage`` first (no extra dependency, available on
@@ -92,8 +93,8 @@ class MemoryWatchdogPlugin(Plugin):
         self._interval: float = 300.0
         self._log_level: int = 20  # logging.INFO
         self._use_psutil: bool = True
-        self._stop_event: Optional[threading.Event] = None
-        self._thread: Optional[threading.Thread] = None
+        self._stop_event: threading.Event | None = None
+        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     @property
@@ -112,7 +113,7 @@ class MemoryWatchdogPlugin(Plugin):
             ],
         )
 
-    def on_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def on_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Read optional configuration before the gateway starts."""
         try:
             if "interval" in config:
@@ -174,7 +175,7 @@ class MemoryWatchdogPlugin(Plugin):
         """Ensure the sampler is stopped if the plugin is unregistered."""
         self.gateway_stop(None)
 
-    def get_rss_mb(self) -> Optional[float]:
+    def get_rss_mb(self) -> float | None:
         """Expose current RSS in MB for the metrics ``_gauge_providers`` seam.
 
         A gateway can register this as a pull-style gauge provider so the value
