@@ -247,6 +247,36 @@ class TestBoxdSandbox:
             await task
 
         client.machines.delete.assert_called_once_with("m-late")
+        client.machines.wait_until_ready.assert_not_called()
+        assert sandbox.machine_id is None
+        assert not sandbox._is_running
+
+    async def test_stop_during_wait_ends_start_without_an_error(self):
+        import asyncio
+        import threading
+
+        sandbox = BoxdSandbox(api_key="test-key")
+        client = _fake_client()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def failing_wait(machine_id):
+            entered.set()
+            release.wait(5)
+            raise RuntimeError("machine not found")
+
+        client.machines.wait_until_ready = MagicMock(side_effect=failing_wait)
+        try:
+            with _started_with(sandbox, client):
+                task = asyncio.ensure_future(sandbox.start())
+                await asyncio.to_thread(entered.wait, 5)
+                await sandbox.stop()
+                # start() returns while the wait call is still running.
+                await asyncio.wait_for(task, 2)
+        finally:
+            release.set()
+
+        client.machines.delete.assert_called_once_with("m-123")
         assert sandbox.machine_id is None
         assert not sandbox._is_running
 
@@ -327,6 +357,26 @@ class TestBoxdSandbox:
         assert client.machines.create.call_count == 1
         assert sandbox._is_running
 
+    def test_stop_from_another_thread_waits_for_the_running_mark(self):
+        import asyncio
+        import threading
+
+        sandbox = _running()
+        # start() holds this lock while it checks for a stop and marks the
+        # sandbox as running.
+        sandbox._state_lock.acquire()
+        thread = threading.Thread(target=lambda: asyncio.run(sandbox.stop()))
+        try:
+            thread.start()
+            thread.join(0.2)
+            assert thread.is_alive()
+            assert sandbox._is_running
+        finally:
+            sandbox._state_lock.release()
+        thread.join(5)
+        assert not sandbox._is_running
+        assert sandbox.machine_id is None
+
     async def test_stop_deletes_a_machine_that_never_became_ready(self):
         sandbox = BoxdSandbox(api_key="test-key")
         sandbox._client = _fake_client()
@@ -387,6 +437,51 @@ class TestBoxdSandbox:
         result = await sandbox.run_command("sleep 10", limits=ResourceLimits(timeout_seconds=2))
         assert result.status == SandboxStatus.TIMEOUT
 
+    async def test_exec_timeout_error_type_maps_to_timeout_status(self):
+        sandbox = _running()
+        sandbox._client.machines.exec.side_effect = TimeoutError("deadline exceeded")
+        result = await sandbox.run_command("sleep 10")
+        assert result.status == SandboxStatus.TIMEOUT
+
+    async def test_execute_rejects_an_unsupported_language(self):
+        sandbox = BoxdSandbox(api_key="test-key")
+        client = _fake_client()
+        with _started_with(sandbox, client):
+            result = await sandbox.execute("console.log(1)", language="javascript")
+        assert result.status == SandboxStatus.FAILED
+        assert "'javascript'" in result.error
+        client.machines.create.assert_not_called()
+        client.machines.exec.assert_not_called()
+
+    @pytest.mark.parametrize("language", ["bash", "sh", "shell", "Bash"])
+    async def test_execute_shell_languages_run_under_bash(self, language):
+        sandbox = _running()
+        await sandbox.execute("echo $0", language=language)
+        assert sandbox._client.machines.exec.call_args.args[1] == ["bash", "-c", "echo $0"]
+
+    @pytest.mark.parametrize("language", ["python", "python3", "Python"])
+    async def test_execute_python_languages(self, language):
+        sandbox = _running()
+        await sandbox.execute("print(1)", language=language)
+        assert sandbox._client.machines.exec.call_args.args[1] == [
+            "bash", "-c", "python3 -c 'print(1)'"
+        ]
+
+    async def test_execute_uploads_code_too_long_for_one_argument(self):
+        sandbox = _running()
+        client = sandbox._client
+        code = "x = 1\n" * 30_000
+
+        result = await sandbox.execute(code, working_dir="/srv")
+
+        assert result.status == SandboxStatus.COMPLETED
+        machine_id, remote_path, uploaded = client.machines.files.upload.call_args.args
+        assert uploaded == code
+        assert remote_path.startswith("/tmp/") and remote_path.endswith("_code.py")
+        assert client.machines.exec.call_args.args[1] == ["bash", "-c", f"python3 {remote_path}"]
+        assert client.machines.exec.call_args.kwargs["cwd"] == "/srv"
+        client.machines.files.delete.assert_called_once_with(machine_id, remote_path)
+
     async def test_execute_file_with_args_removes_its_upload(self, tmp_path):
         script = tmp_path / "job.py"
         script.write_text("import sys; print(sys.argv[1])")
@@ -404,6 +499,22 @@ class TestBoxdSandbox:
         assert await sandbox.write_file("/tmp/a/b.txt", "hi") is True
         sandbox._client.machines.files.upload.assert_called_once_with("m-123", "/tmp/a/b.txt", "hi")
         assert await sandbox.read_file("/tmp/a/b.txt") == "hi"
+
+    async def test_read_file_returns_bytes_when_not_text(self):
+        sandbox = _running()
+        data = b"\x89PNG\r\n\x1a\n\xff\xfe"
+        sandbox._client.machines.files.download.return_value = data
+        assert await sandbox.read_file("/tmp/a.png") == data
+
+    async def test_file_calls_on_a_stopped_machine_fail_cleanly(self):
+        sandbox = _running()
+        sandbox.machine_id = None
+        assert await sandbox.write_file("/tmp/a", "x") is False
+        assert await sandbox.read_file("/tmp/a") is None
+        assert await sandbox.list_files("/tmp") == []
+        sandbox._client.machines.files.upload.assert_not_called()
+        sandbox._client.machines.files.download.assert_not_called()
+        sandbox._client.machines.files.list_dir.assert_not_called()
 
     async def test_read_missing_file_returns_none(self):
         sandbox = _running()
@@ -431,11 +542,48 @@ class TestBoxdSandbox:
         assert not sandbox._is_running
         assert sandbox.machine_id is None
 
-    async def test_stop_survives_delete_error(self):
+    async def test_stop_keeps_the_id_when_delete_fails_and_retries(self):
         sandbox = _running()
-        sandbox._client.machines.delete.side_effect = Exception("gone")
+        client = sandbox._client
+        client.machines.delete.side_effect = Exception("connection reset")
         await sandbox.stop()
         assert not sandbox._is_running
+        assert sandbox.machine_id == "m-123"
+
+        client.machines.delete.side_effect = None
+        await sandbox.cleanup()
+        assert client.machines.delete.call_count == 2
+        assert sandbox.machine_id is None
+
+    async def test_stop_counts_a_machine_that_is_gone_as_deleted(self):
+        class NotFoundError(Exception):
+            pass
+
+        sandbox = _running()
+        sandbox._client.machines.delete.side_effect = NotFoundError("machine not found")
+        with patch.dict(sys.modules, {"boxd": SimpleNamespace(NotFoundError=NotFoundError)}):
+            await sandbox.stop()
+        assert sandbox.machine_id is None
+
+    async def test_start_retries_a_failed_delete_before_creating(self):
+        sandbox = _running()
+        client = sandbox._client
+        client.machines.delete.side_effect = Exception("connection reset")
+        await sandbox.stop()
+
+        with _started_with(sandbox, client):
+            with pytest.raises(RuntimeError, match="could not delete machine m-123"):
+                await sandbox.start()
+            client.machines.create.assert_not_called()
+            assert sandbox.machine_id == "m-123"
+
+            client.machines.delete.side_effect = None
+            client.machines.create.return_value = SimpleNamespace(id="m-456")
+            await sandbox.start()
+
+        assert client.machines.delete.call_args.args == ("m-123",)
+        assert sandbox.machine_id == "m-456"
+        assert sandbox._is_running
 
     async def test_stop_deletes_without_worker_threads(self):
         sandbox = _running()

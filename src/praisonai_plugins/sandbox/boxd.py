@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 _INSTALL_HINT = "pip install praisonai-plugins[boxd]"
 _NAME_PREFIX = "praisonai-"
 _DEFAULT_MAX_LIFETIME = 24 * 60 * 60
+_PYTHON_LANGUAGES = ("python", "python3")
+_SHELL_LANGUAGES = ("bash", "sh", "shell")
+# Linux caps one argument at 128 KiB, so longer code is uploaded and run as a file.
+_MAX_INLINE_COMMAND = 100_000
+
+
+def _is_not_found(exc: Exception) -> bool:
+    try:
+        from boxd import NotFoundError
+    except ImportError:
+        return False
+    return isinstance(exc, NotFoundError)
 
 
 class BoxdSandbox:
@@ -41,6 +53,10 @@ class BoxdSandbox:
     it with ``isolated=True``, so it joins no private network and holds no
     credentials. ``stop()`` deletes it. If ``stop()`` never runs, boxd deletes
     the machine itself once it is ``max_lifetime`` seconds old.
+
+    ``SandboxConfig.env`` and the per-call ``env`` are sent to the machine.
+    The machine has outbound internet access, whatever
+    ``ResourceLimits.network_enabled`` says.
 
     Example:
         import os
@@ -99,6 +115,9 @@ class BoxdSandbox:
         # A threading lock, not an asyncio one: a sync Agent runs each tool
         # call on its own event loop, and callers may be on different threads.
         self._start_lock = threading.Lock()
+        # Guards _stops and _is_running, so a stop() from another thread cannot
+        # land between start()'s last check and its "running" mark.
+        self._state_lock = threading.Lock()
 
     @property
     def is_available(self) -> bool:
@@ -144,6 +163,15 @@ class BoxdSandbox:
 
     async def _create_and_wait(self) -> None:
         client = self._get_client()
+        if self.machine_id is not None:
+            # An earlier delete failed. Retry it before making a new machine,
+            # so this sandbox never loses track of one.
+            leftover = self.machine_id
+            await self._delete_machine()
+            if self.machine_id is not None:
+                raise RuntimeError(
+                    f"boxd could not delete machine {leftover}. Call stop() to retry."
+                )
         options: dict[str, Any] = {"isolated": True}
         if self.org:
             options["org"] = self.org
@@ -161,16 +189,29 @@ class BoxdSandbox:
         machine = await self._create_machine(client, name, options)
         self.machine_id = machine.id
         try:
-            await asyncio.to_thread(client.machines.wait_until_ready, machine.id)
+            if stops == self._stops:
+                ready = asyncio.get_running_loop().run_in_executor(
+                    None, client.machines.wait_until_ready, machine.id
+                )
+                ready.add_done_callback(lambda done: done.cancelled() or done.exception())
+                # Poll, so a stop() ends this wait at once. Its outcome no
+                # longer matters then: stop() has deleted the machine.
+                while stops == self._stops and not ready.done():
+                    await asyncio.wait([ready], timeout=0.05)
+                if stops == self._stops:
+                    ready.result()
         except BaseException:
             # Also on cancel or Ctrl-C: the machine exists, so delete it.
             await self._delete_machine()
             raise
-        if stops != self._stops:
+        with self._state_lock:
+            stopped = stops != self._stops
+            if not stopped:
+                self._is_running = True
+        if stopped:
             # stop() ran while the machine was starting, so stop() wins.
             await self._delete_machine()
             return
-        self._is_running = True
         logger.info("boxd sandbox started: %s (%s)", name, machine.id)
 
     async def _create_machine(self, client, name: str, options: dict[str, Any]):
@@ -201,8 +242,8 @@ class BoxdSandbox:
             raise
 
     async def _delete_machine(self) -> None:
+        """Delete the machine. The id is kept if that fails, so stop() can retry."""
         machine_id = self.machine_id
-        self.machine_id = None
         if machine_id is None:
             return
         delete = self._get_client().machines.delete
@@ -216,16 +257,24 @@ class BoxdSandbox:
                     raise
                 delete(machine_id)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("boxd machine delete failed for %s: %s", machine_id, exc)
+            if not _is_not_found(exc):
+                logger.warning(
+                    "boxd machine delete failed for %s, stop() will retry: %s", machine_id, exc
+                )
+                return
+        if self.machine_id == machine_id:
+            self.machine_id = None
 
     async def stop(self) -> None:
-        """Delete the machine."""
-        self._stops += 1
-        if not self._is_running and self.machine_id is None:
+        """Delete the machine. If that fails, the next stop() or cleanup() retries."""
+        with self._state_lock:
+            self._stops += 1
+            self._is_running = False
+        if self.machine_id is None:
             return
-        self._is_running = False
         await self._delete_machine()
-        logger.info("boxd sandbox stopped")
+        if self.machine_id is None:
+            logger.info("boxd sandbox stopped")
 
     async def execute(
         self,
@@ -235,15 +284,34 @@ class BoxdSandbox:
         env: dict[str, str] | None = None,
         working_dir: str | None = None,
     ) -> SandboxResult:
-        """Execute code in the sandbox."""
+        """Execute Python or shell code in the sandbox.
+
+        ``language`` is "python" or "bash" ("python3", "sh" and "shell" also
+        work; shell code runs under bash). Anything else fails.
+        """
+        language_key = language.lower()
+        if language_key not in _PYTHON_LANGUAGES + _SHELL_LANGUAGES:
+            return SandboxResult(
+                execution_id=str(uuid.uuid4()),
+                status=SandboxStatus.FAILED,
+                error=f"boxd sandbox supports Python and bash, got {language!r}",
+            )
+        is_shell = language_key in _SHELL_LANGUAGES
+
         if not self._is_running:
             await self.start()
 
         limits = limits or self.config.resource_limits
-        if language == "bash":
-            command = code
-        else:
-            command = f"python3 -c {shlex.quote(code)}"
+        command = code if is_shell else f"python3 -c {shlex.quote(code)}"
+        if len(command.encode("utf-8")) > _MAX_INLINE_COMMAND:
+            return await self._run_uploaded(
+                code,
+                "bash" if is_shell else "python3",
+                "code.sh" if is_shell else "code.py",
+                limits=limits,
+                env=env,
+                working_dir=working_dir,
+            )
 
         return await self._run_command(
             command,
@@ -322,7 +390,10 @@ class BoxdSandbox:
             )
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
-            status = SandboxStatus.TIMEOUT if "timed out" in error.lower() else SandboxStatus.FAILED
+            timed_out = isinstance(exc, TimeoutError) or any(
+                word in error.lower() for word in ("timed out", "timeout")
+            )
+            status = SandboxStatus.TIMEOUT if timed_out else SandboxStatus.FAILED
             return SandboxResult(
                 execution_id=execution_id,
                 status=status,
@@ -355,21 +426,41 @@ class BoxdSandbox:
 
         language = "bash" if file_path.endswith((".sh", ".bash")) else "python"
         if args:
-            remote_path = f"/tmp/{uuid.uuid4().hex}_{os.path.basename(file_path)}"
-            if not await self.write_file(remote_path, code):
-                return SandboxResult(
-                    execution_id=str(uuid.uuid4()),
-                    status=SandboxStatus.FAILED,
-                    error=f"Could not upload {file_path} to sandbox",
-                )
-            interpreter = "bash" if language == "bash" else "python3"
-            parts = [interpreter, remote_path] + list(args)
-            try:
-                return await self.run_command(parts, limits=limits, env=env)
-            finally:
-                await self._remove_file(remote_path)
+            return await self._run_uploaded(
+                code,
+                "bash" if language == "bash" else "python3",
+                os.path.basename(file_path),
+                args=args,
+                limits=limits,
+                env=env,
+            )
 
         return await self.execute(code, language=language, limits=limits, env=env)
+
+    async def _run_uploaded(
+        self,
+        code: str,
+        interpreter: str,
+        name: str,
+        *,
+        args: list[str] | None = None,
+        limits: ResourceLimits | None = None,
+        env: dict[str, str] | None = None,
+        working_dir: str | None = None,
+    ) -> SandboxResult:
+        """Upload code to /tmp, run it as a file, then remove it."""
+        remote_path = f"/tmp/{uuid.uuid4().hex}_{name}"
+        if not await self.write_file(remote_path, code):
+            return SandboxResult(
+                execution_id=str(uuid.uuid4()),
+                status=SandboxStatus.FAILED,
+                error=f"Could not upload {name} to sandbox",
+            )
+        parts = [interpreter, remote_path] + list(args or [])
+        try:
+            return await self.run_command(parts, limits=limits, env=env, working_dir=working_dir)
+        finally:
+            await self._remove_file(remote_path)
 
     async def _remove_file(self, path: str) -> None:
         if self.machine_id is None:
@@ -385,6 +476,9 @@ class BoxdSandbox:
         """Write a file to the sandbox. Parent directories are created."""
         if not self._is_running:
             await self.start()
+        if self.machine_id is None:
+            logger.error("boxd write_file failed for %s: sandbox is not running", path)
+            return False
         try:
             await asyncio.to_thread(
                 self._get_client().machines.files.upload, self.machine_id, path, content
@@ -395,27 +489,36 @@ class BoxdSandbox:
             return False
 
     async def read_file(self, path: str) -> str | bytes | None:
-        """Read a file from the sandbox as text."""
+        """Read a file from the sandbox: text as str, anything else as bytes."""
         if not self._is_running:
             await self.start()
+        if self.machine_id is None:
+            logger.warning("boxd read_file failed for %s: sandbox is not running", path)
+            return None
         try:
             content = await asyncio.to_thread(
                 self._get_client().machines.files.download, self.machine_id, path
             )
-            return content.decode("utf-8", errors="replace")
         except Exception as exc:  # noqa: BLE001
             logger.warning("boxd read_file failed for %s: %s", path, exc)
             return None
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            return content
 
     async def list_files(self, path: str = "/") -> list[str]:
         """List the files in a sandbox directory (not recursive)."""
         if not self._is_running:
             await self.start()
+        if self.machine_id is None:
+            return []
         try:
             listing = await asyncio.to_thread(
                 self._get_client().machines.files.list_dir, self.machine_id, path
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("boxd list_files failed for %s: %s", path, exc)
             return []
         base = path.rstrip("/")
         return [f"{base}/{entry.name}" for entry in listing.entries if not entry.is_dir]
