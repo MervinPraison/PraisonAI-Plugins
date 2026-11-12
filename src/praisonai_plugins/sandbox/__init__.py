@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .boxd import BoxdSandbox
     from .capsule import CapsuleSandbox
 
-__all__ = ["CapsuleSandbox"]
+__all__ = ["BoxdSandbox", "CapsuleSandbox"]
 
 
 def __getattr__(name: str) -> Any:
@@ -15,4 +16,8 @@ def __getattr__(name: str) -> Any:
         from .capsule import CapsuleSandbox
 
         return CapsuleSandbox
+    if name == "BoxdSandbox":
+        from .boxd import BoxdSandbox
+
+        return BoxdSandbox
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
