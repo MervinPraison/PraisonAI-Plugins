@@ -118,7 +118,45 @@ result = manager.run_code("print('hello')", language="python")
 | Entry point group | Purpose | Example |
 |-------------------|---------|---------|
 | `praisonai.plugins` | Lifecycle hooks, guardrails, policies | `simple_logger`, `pii_guardrail` |
-| `praisonai.sandbox` | Optional sandbox backends | `capsule` |
+| `praisonai.sandbox` | Optional sandbox backends | `capsule`, `boxd` |
+
+### boxd
+
+`BoxdSandbox` runs agent code in a [boxd](https://boxd.sh?ref=PraisonAI-Plugins) machine, a full Ubuntu VM with Python 3. Each sandbox is one machine, created with `isolated=True` and deleted by `stop()`.
+
+```bash
+pip install "praisonai-plugins[boxd]"
+export BOXD_API_KEY=...   # boxd auth keys create <name>
+```
+
+```python
+from praisonai_plugins.sandbox import BoxdSandbox
+
+sandbox = BoxdSandbox(region="fra")  # or BOXD_REGION; BOXD_ORG picks the org
+try:
+    result = await sandbox.execute("print('hello from boxd')")
+finally:
+    await sandbox.stop()
+```
+
+With `praisonai` installed as well, the name `boxd` works wherever a sandbox name does:
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(name="builder", instructions="You build things.", tools_run_on="boxd")
+```
+
+```python
+from praisonaiagents.sandbox import SandboxManager, SandboxConfig
+
+manager = SandboxManager(SandboxConfig(sandbox_type="boxd"))
+result = await manager.run_code("print('hello')", language="python")
+```
+
+Options: `api_key`, `org`, `region` (`fra` or `nyc`), `vcpu` and `memory` (1/`"4G"`, 2/`"8G"`, 4/`"16G"`, 8/`"32G"`; default: your org's size), `from_snapshot`, and `max_lifetime`. If the process dies before `stop()` runs, boxd deletes the machine once it is `max_lifetime` seconds old (default 24 hours), so raise it for longer sessions. A command that runs past `ResourceLimits.timeout_seconds` returns `status=TIMEOUT` and is killed in the machine.
+
+`execute()` runs `language="python"` or `"bash"` and fails for any other language. `read_file()` returns text as `str` and any other content as `bytes`. `SandboxConfig.env` and the per-call `env` are sent to the machine. The machine has outbound internet access, and `ResourceLimits.network_enabled` does not change that.
 
 ---
 

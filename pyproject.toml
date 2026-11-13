@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 capsule = ["capsule>=0.1.0"]
+boxd = ["boxd>=0.3.1"]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 
 [project.entry-points."praisonai.plugins"]
@@ -35,6 +36,7 @@ perseus_vault = "praisonai_plugins.integrations.perseus_vault:PerseusVaultPlugin
 
 [project.entry-points."praisonai.sandbox"]
 capsule = "praisonai_plugins.sandbox.capsule:CapsuleSandbox"
+boxd = "praisonai_plugins.sandbox.boxd:BoxdSandbox"
 
 [tool.setuptools.packages.find]
 where = ["src"]
