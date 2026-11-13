@@ -36,6 +36,11 @@ _PYTHON_LANGUAGES = ("python", "python3")
 _SHELL_LANGUAGES = ("bash", "sh", "shell")
 # Linux caps one argument at 128 KiB, so longer code is uploaded and run as a file.
 _MAX_INLINE_COMMAND = 100_000
+# Runs an uploaded file the way "python3 -c" runs code: imports resolve from
+# the working directory and sys.argv is ["-c"].
+_PYTHON_RUN_UPLOADED = (
+    'exec(compile(open(__import__("sys").argv.pop(), encoding="utf-8").read(), "<string>", "exec"))'
+)
 
 
 def _is_not_found(exc: Exception) -> bool:
@@ -152,16 +157,18 @@ class BoxdSandbox:
                 f"boxd is not available. Install the boxd SDK and set BOXD_API_KEY. {_INSTALL_HINT}"
             )
 
+        # Read before any waiting: a stop() that lands from here on wins.
+        stops = self._stops
         while not self._start_lock.acquire(blocking=False):
             await asyncio.sleep(0.05)
         try:
             # Another caller may have started the machine while this one waited.
-            if not self._is_running:
-                await self._create_and_wait()
+            if not self._is_running and stops == self._stops:
+                await self._create_and_wait(stops)
         finally:
             self._start_lock.release()
 
-    async def _create_and_wait(self) -> None:
+    async def _create_and_wait(self, stops: int) -> None:
         client = self._get_client()
         if self.machine_id is not None:
             # An earlier delete failed. Retry it before making a new machine,
@@ -172,6 +179,9 @@ class BoxdSandbox:
                 raise RuntimeError(
                     f"boxd could not delete machine {leftover}. Call stop() to retry."
                 )
+            if stops != self._stops:
+                # stop() ran during that retry, so no new machine.
+                return
         options: dict[str, Any] = {"isolated": True}
         if self.org:
             options["org"] = self.org
@@ -185,7 +195,6 @@ class BoxdSandbox:
             options["delete_after"] = int(self.max_lifetime)
 
         name = f"{_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
-        stops = self._stops
         machine = await self._create_machine(client, name, options)
         self.machine_id = machine.id
         try:
@@ -308,6 +317,7 @@ class BoxdSandbox:
                 code,
                 "bash" if is_shell else "python3",
                 "code.sh" if is_shell else "code.py",
+                as_inline_python=not is_shell,
                 limits=limits,
                 env=env,
                 working_dir=working_dir,
@@ -444,11 +454,16 @@ class BoxdSandbox:
         name: str,
         *,
         args: list[str] | None = None,
+        as_inline_python: bool = False,
         limits: ResourceLimits | None = None,
         env: dict[str, str] | None = None,
         working_dir: str | None = None,
     ) -> SandboxResult:
-        """Upload code to /tmp, run it as a file, then remove it."""
+        """Upload code to /tmp, run it, then remove it.
+
+        With ``as_inline_python`` the code runs as it would under
+        ``python3 -c``, not as a script in /tmp.
+        """
         remote_path = f"/tmp/{uuid.uuid4().hex}_{name}"
         if not await self.write_file(remote_path, code):
             return SandboxResult(
@@ -456,7 +471,10 @@ class BoxdSandbox:
                 status=SandboxStatus.FAILED,
                 error=f"Could not upload {name} to sandbox",
             )
-        parts = [interpreter, remote_path] + list(args or [])
+        if as_inline_python:
+            parts = [interpreter, "-c", _PYTHON_RUN_UPLOADED, remote_path]
+        else:
+            parts = [interpreter, remote_path] + list(args or [])
         try:
             return await self.run_command(parts, limits=limits, env=env, working_dir=working_dir)
         finally:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from praisonaiagents.sandbox import ResourceLimits, SandboxConfig, SandboxStatus
 
-from praisonai_plugins.sandbox.boxd import BoxdSandbox
+from praisonai_plugins.sandbox.boxd import _PYTHON_RUN_UPLOADED, BoxdSandbox
 
 
 @pytest.fixture(autouse=True)
@@ -478,9 +479,41 @@ class TestBoxdSandbox:
         machine_id, remote_path, uploaded = client.machines.files.upload.call_args.args
         assert uploaded == code
         assert remote_path.startswith("/tmp/") and remote_path.endswith("_code.py")
-        assert client.machines.exec.call_args.args[1] == ["bash", "-c", f"python3 {remote_path}"]
+        # Run as "python3 -c" would, so imports still resolve from working_dir.
+        command = client.machines.exec.call_args.args[1][2]
+        assert shlex.split(command) == ["python3", "-c", _PYTHON_RUN_UPLOADED, remote_path]
         assert client.machines.exec.call_args.kwargs["cwd"] == "/srv"
         client.machines.files.delete.assert_called_once_with(machine_id, remote_path)
+
+    def test_uploaded_python_imports_from_the_working_dir(self, tmp_path):
+        import subprocess
+
+        (tmp_path / "work").mkdir()
+        (tmp_path / "work" / "helper.py").write_text("VALUE = 42\n")
+        (tmp_path / "upload").mkdir()
+        code = tmp_path / "upload" / "code.py"
+        code.write_text("import sys, helper\nprint(helper.VALUE, sys.argv, __name__)\n")
+
+        done = subprocess.run(
+            [sys.executable, "-c", _PYTHON_RUN_UPLOADED, str(code)],
+            cwd=tmp_path / "work",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert done.stdout == "42 ['-c'] __main__\n", done.stderr
+
+    async def test_execute_uploads_long_shell_code_and_runs_it_under_bash(self):
+        sandbox = _running()
+        client = sandbox._client
+
+        await sandbox.execute("true\n" * 30_000, language="bash")
+
+        remote_path = client.machines.files.upload.call_args.args[1]
+        assert remote_path.endswith("_code.sh")
+        assert client.machines.exec.call_args.args[1] == ["bash", "-c", f"bash {remote_path}"]
 
     async def test_execute_file_with_args_removes_its_upload(self, tmp_path):
         script = tmp_path / "job.py"
@@ -492,6 +525,9 @@ class TestBoxdSandbox:
         assert result.status == SandboxStatus.COMPLETED
         machine_id, remote_path = sandbox._client.machines.files.upload.call_args.args[:2]
         assert remote_path.startswith("/tmp/") and remote_path.endswith("_job.py")
+        assert sandbox._client.machines.exec.call_args.args[1] == [
+            "bash", "-c", f"python3 {remote_path} x"
+        ]
         sandbox._client.machines.files.delete.assert_called_once_with(machine_id, remote_path)
 
     async def test_write_and_read_file(self):
@@ -584,6 +620,67 @@ class TestBoxdSandbox:
         assert client.machines.delete.call_args.args == ("m-123",)
         assert sandbox.machine_id == "m-456"
         assert sandbox._is_running
+
+    async def test_stop_during_a_delete_retry_creates_no_machine(self):
+        import asyncio
+        import threading
+
+        sandbox = _running()
+        client = sandbox._client
+        client.machines.delete.side_effect = Exception("connection reset")
+        await sandbox.stop()
+        assert sandbox.machine_id == "m-123"
+
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def slow_first_delete(machine_id):
+            calls.append(machine_id)
+            if len(calls) == 1:
+                entered.set()
+                release.wait(5)
+
+        client.machines.delete = MagicMock(side_effect=slow_first_delete)
+        with _started_with(sandbox, client):
+            task = asyncio.ensure_future(sandbox.start())
+            await asyncio.to_thread(entered.wait, 5)
+            await sandbox.stop()
+            release.set()
+            await task
+
+        client.machines.create.assert_not_called()
+        assert sandbox.machine_id is None
+        assert not sandbox._is_running
+
+    async def test_stop_ends_a_start_that_waits_for_another_start(self):
+        import asyncio
+        import threading
+
+        sandbox = BoxdSandbox(api_key="test-key")
+        client = _fake_client()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_create(name, **kwargs):
+            entered.set()
+            release.wait(5)
+            return SimpleNamespace(id="m-late")
+
+        client.machines.create = MagicMock(side_effect=slow_create)
+        with _started_with(sandbox, client):
+            first = asyncio.ensure_future(sandbox.start())
+            await asyncio.to_thread(entered.wait, 5)
+            second = asyncio.ensure_future(sandbox.start())
+            await asyncio.sleep(0.1)
+            await sandbox.stop()
+            release.set()
+            await asyncio.gather(first, second)
+
+        client.machines.create.assert_called_once()
+        client.machines.delete.assert_called_once_with("m-late")
+        assert sandbox.machine_id is None
+        assert not sandbox._is_running
 
     async def test_stop_deletes_without_worker_threads(self):
         sandbox = _running()
