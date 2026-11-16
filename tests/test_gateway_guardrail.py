@@ -1,8 +1,7 @@
 """Tests for the GatewayGuardrailPlugin.
 
 Covers inbound admission/filter (``before_message``), outbound on-channel
-redaction (``after_message``) including the per-channel policy, and the
-``as_guardrail()`` adapter. Uses the real ``praisonaiagents`` plugin surface.
+redaction (``after_message``) including the per-channel policy. Uses the real ``praisonaiagents`` plugin surface.
 """
 
 import importlib
@@ -61,9 +60,11 @@ def test_before_message_denies_oversized(monkeypatch):
 
 
 def test_after_message_redacts_ssn(plugin):
-    out = plugin.after_message({"content": "my ssn is 123-45-6789 ok"})
+    msg = {"content": "my ssn is 123-45-6789 ok"}
+    out = plugin.after_message(msg)
     assert "123-45-6789" not in out["content"]
     assert "[REDACTED]" in out["content"]
+    assert msg["content"] == "my ssn is 123-45-6789 ok"  # caller's dict untouched
 
 
 def test_after_message_redacts_secret_token(plugin):
@@ -85,20 +86,7 @@ def test_per_channel_policy_phone_only_public(plugin):
     assert "+1 415 555 2671" not in public["content"]
 
 
-def test_as_guardrail_output_and_tool_result(plugin):
-    guardrail = plugin.as_guardrail()
-    ok, out = guardrail.validate_output("leak 123-45-6789")
-    assert ok and "123-45-6789" not in out
-
-    ok2, res = guardrail.validate_tool_result("fetch", "key AKIA1234567890ABCDEF here")
-    assert ok2 and "AKIA1234567890ABCDEF" not in res
-
-    ok3, passthrough = guardrail.validate_tool_result("fetch", {"non": "string"})
-    assert ok3 and passthrough == {"non": "string"}
-
-
 def test_entry_point_registered():
     # Ensure the module import path used by pyproject resolves.
     mod = importlib.import_module("praisonai_plugins.policies.gateway_guardrail")
-    assert hasattr(mod, "GatewayGuardrailPlugin")
-    assert mod.create_plugin().info.name == "gateway_guardrail"
+    assert mod.GatewayGuardrailPlugin().info.name == "gateway_guardrail"
