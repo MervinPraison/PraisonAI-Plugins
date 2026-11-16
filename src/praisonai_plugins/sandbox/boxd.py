@@ -1,19 +1,13 @@
 """boxd sandbox backend for PraisonAI. Requires: pip install praisonai-plugins[boxd]"""
 
-from __future__ import annotations
-
 import asyncio
-import functools
 import importlib.util
-import logging
 import os
 import shlex
 import threading
 import time
 
 from praisonaiagents.sandbox import SandboxConfig, SandboxResult, SandboxStatus
-
-logger = logging.getLogger(__name__)
 
 
 class BoxdSandbox:
@@ -23,23 +17,23 @@ class BoxdSandbox:
         self.config = config or SandboxConfig(sandbox_type="boxd")
         self._api_key = api_key or os.environ.get("BOXD_API_KEY", "")
         self.machine_id: str | None = None
-        self._warned = False
         self._lock = threading.Lock()  # start() and stop() may run on different threads
 
     @property
     def is_available(self) -> bool:
         return bool(self._api_key.strip()) and importlib.util.find_spec("boxd") is not None
 
-    def _start(self) -> None:
+    def _start(self) -> bool:
         with self._lock:
             if self.machine_id is not None:
-                return
+                return False
             if not self.is_available:
                 raise RuntimeError("boxd needs BOXD_API_KEY and: pip install praisonai-plugins[boxd]")
             from boxd import Boxd
             self._client = Boxd(api_key=self._api_key)
             machine = self._client.machines.create(
-                f"praisonai-{os.urandom(4).hex()}", org=os.environ.get("BOXD_ORG"), isolated=True,
+                f"praisonai-{os.urandom(4).hex()}", org=os.environ.get("BOXD_ORG"),
+                spec={"isolated": True, "egress": [] if self.config.resource_limits.network_enabled else ["none"]},
                 delete_after=86400,  # boxd deletes the machine after a day if stop() never runs
             )
             try:
@@ -48,6 +42,7 @@ class BoxdSandbox:
                 self._client.machines.delete(machine.id)
                 raise
             self.machine_id = machine.id
+            return True
 
     def _stop(self) -> None:
         with self._lock:
@@ -56,7 +51,13 @@ class BoxdSandbox:
                 self.machine_id = None
 
     async def start(self) -> None:
-        await asyncio.to_thread(self._start)
+        task = asyncio.ensure_future(asyncio.to_thread(self._start))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:  # the thread still runs: wait, then delete what it created
+            if await asyncio.gather(task, return_exceptions=True) == [True]:
+                await asyncio.to_thread(self._stop)
+            raise
 
     async def stop(self) -> None:
         try:
@@ -75,21 +76,19 @@ class BoxdSandbox:
 
     async def run_command(self, command, limits=None, env=None, working_dir=None) -> SandboxResult:
         limits = limits or self.config.resource_limits
-        if not limits.network_enabled and not self._warned:
-            self._warned = True
-            logger.warning("network_enabled is False, but the boxd machine has outbound internet access")
+        if not limits.network_enabled and self.config.resource_limits.network_enabled:
+            return SandboxResult(status=SandboxStatus.FAILED, error="this sandbox was created with network access")
         argv = ["bash", "-c", command if isinstance(command, str) else shlex.join(command)]
         env = {**self.config.env, **(env or {})} or None
         await self.start()
         started_at = time.time()
         try:
-            run = functools.partial(self._client.machines.exec, self.machine_id, argv, env=env, cwd=working_dir)
-            done = await asyncio.to_thread(run, timeout=limits.timeout_seconds)
+            done = await asyncio.to_thread(
+                self._client.machines.exec, self.machine_id, argv, env=env, cwd=working_dir, timeout=limits.timeout_seconds)
             result = SandboxResult(exit_code=done.exit_code, stdout=done.stdout or "", stderr=done.stderr or "")
             result.status = SandboxStatus.COMPLETED if done.exit_code == 0 else SandboxStatus.FAILED
         except Exception as exc:  # noqa: BLE001
-            result = SandboxResult(status=SandboxStatus.FAILED, error=str(exc))
-            if isinstance(exc, TimeoutError) or "timed out" in str(exc).lower():
-                result.status = SandboxStatus.TIMEOUT
+            timed_out = isinstance(exc, TimeoutError) or "timed out" in str(exc).lower()
+            result = SandboxResult(status=SandboxStatus.TIMEOUT if timed_out else SandboxStatus.FAILED, error=str(exc))
         result.duration_seconds = time.time() - started_at
         return result

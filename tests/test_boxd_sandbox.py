@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.machinery
-import logging
 import sys
 import threading
 import time
@@ -77,7 +76,7 @@ class TestStartStop:
         assert client.machines.create.call_args.args[0].startswith("praisonai-")
         assert client.machines.create.call_args.kwargs == {
             "org": "acme",
-            "isolated": True,
+            "spec": {"isolated": True, "egress": ["none"]},
             "delete_after": 86400,
         }
         client.machines.wait_until_ready.assert_called_once_with("m-123")
@@ -245,26 +244,58 @@ class TestRunCommand:
         assert client.machines.create.call_count == 1
 
 
-class TestNetworkWarning:
-    async def test_warns_once_when_network_is_disabled(self, client, caplog):
+class TestNetwork:
+    async def test_network_disabled_creates_the_machine_without_internet(self, client):
+        await _sandbox().execute("print(1)")
+        assert client.machines.create.call_args.kwargs["spec"] == {"isolated": True, "egress": ["none"]}
+
+    async def test_network_enabled_creates_the_machine_with_internet(self, client):
+        limits = ResourceLimits(network_enabled=True)
+        sandbox = _sandbox(config=SandboxConfig(sandbox_type="boxd", resource_limits=limits))
+        result = await sandbox.run_command("true")
+        assert result.status == SandboxStatus.COMPLETED
+        assert client.machines.create.call_args.kwargs["spec"] == {"isolated": True, "egress": []}
+
+    async def test_call_that_disables_the_network_fails_on_a_networked_machine(self, client):
+        limits = ResourceLimits(network_enabled=True)
+        sandbox = _sandbox(config=SandboxConfig(sandbox_type="boxd", resource_limits=limits))
+        result = await sandbox.run_command("true", limits=ResourceLimits())
+        assert result.status == SandboxStatus.FAILED
+        assert "network access" in result.error
+        client.machines.exec.assert_not_called()
+
+
+class TestCancelledStart:
+    async def _cancel_during_create(self, client, sandbox):
+        creating = threading.Event()
+        release = threading.Event()
+
+        def slow_create(*args, **kwargs):
+            creating.set()
+            release.wait(5)
+            return SimpleNamespace(id="m-123")
+
+        client.machines.create.side_effect = slow_create
+        start = asyncio.create_task(sandbox.start())
+        await asyncio.to_thread(creating.wait, 5)
+        start.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await start
+
+    async def test_cancelled_start_deletes_the_machine_it_created(self, client):
         sandbox = _sandbox()
-        with caplog.at_level(logging.WARNING, logger="praisonai_plugins.sandbox.boxd"):
-            await sandbox.execute("print(1)")
-            await sandbox.run_command("true", limits=ResourceLimits(network_enabled=False))
-        warnings = [r.message for r in caplog.records if "network_enabled" in r.message]
-        assert warnings == ["network_enabled is False, but the boxd machine has outbound internet access"]
+        await self._cancel_during_create(client, sandbox)
+        client.machines.delete.assert_called_once_with("m-123")
+        assert sandbox.machine_id is None
 
-    async def test_no_warning_when_network_is_enabled(self, client, caplog):
-        limits = ResourceLimits(network_enabled=True)
-        sandbox = _sandbox(config=SandboxConfig(sandbox_type="boxd", resource_limits=limits))
-        with caplog.at_level(logging.WARNING, logger="praisonai_plugins.sandbox.boxd"):
-            await sandbox.run_command("true")
-        assert "network_enabled" not in caplog.text
-
-    async def test_warns_for_a_call_that_disables_the_network(self, client, caplog):
-        limits = ResourceLimits(network_enabled=True)
-        sandbox = _sandbox(config=SandboxConfig(sandbox_type="boxd", resource_limits=limits))
-        with caplog.at_level(logging.WARNING, logger="praisonai_plugins.sandbox.boxd"):
-            await sandbox.run_command("true")
-            await sandbox.run_command("true", limits=ResourceLimits())
-        assert caplog.text.count("network_enabled is False") == 1
+    async def test_cancelled_start_keeps_a_machine_it_did_not_create(self, client):
+        sandbox = _sandbox()
+        await sandbox.start()
+        start = asyncio.create_task(sandbox.start())
+        start.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await start
+        client.machines.delete.assert_not_called()
+        assert sandbox.machine_id == "m-123"
