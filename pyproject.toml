@@ -43,3 +43,9 @@ include = ["praisonai_plugins", "praisonai_plugins.*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# Pin the rule set: CI installs ruff unpinned, and newer ruff defaults
+# turned on rules this codebase was never written against.
+select = ["E", "F"]
+ignore = ["E501"]
