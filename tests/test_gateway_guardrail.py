@@ -90,3 +90,17 @@ def test_entry_point_registered():
     # Ensure the module import path used by pyproject resolves.
     mod = importlib.import_module("praisonai_plugins.policies.gateway_guardrail")
     assert mod.GatewayGuardrailPlugin().info.name == "gateway_guardrail"
+
+
+def test_public_policy_applies_when_outbound_lacks_channel_type(plugin):
+    # Core's MessageSendingInput has channel_id but no channel_type.
+    plugin.before_message({"sender_id": "bob", "content": "hi", "channel_id": "C1", "channel_type": "group"})
+    out = plugin.after_message({"content": "call +1 415 555 2671 now", "channel_id": "C1"})
+    assert out["content"] == "call [REDACTED] now"
+    dm = plugin.after_message({"content": "call +1 415 555 2671 now", "channel_id": "D9"})
+    assert "+1 415 555 2671" in dm["content"]
+
+
+def test_after_message_redacts_project_scoped_key(plugin):
+    out = plugin.after_message({"content": "key sk-proj-abc_DEF-1234567890xyz end"})
+    assert out["content"] == "key [REDACTED] end"

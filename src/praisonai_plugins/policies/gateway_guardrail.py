@@ -32,11 +32,11 @@ _BASE_PATTERNS = (
     re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),  # email
     re.compile(r"\b(?:\d[ -]?){13,16}\b"),  # card-like digit runs
     re.compile(  # common API token prefixes
-        r"\b(?:sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}"
+        r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}"
         r"|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b"
     ),
 )
-_PUBLIC_PATTERNS = (re.compile(r"\b\+?\d[\d ().-]{7,}\d\b"),)  # phone numbers
+_PUBLIC_PATTERNS = (re.compile(r"(?<!\w)\+?\d[\d ().-]{7,}\d\b"),)  # phone numbers
 
 
 def _env_set(name: str) -> set[str]:
@@ -53,6 +53,8 @@ class GatewayGuardrailPlugin(Plugin):
             self._max_inbound = int(os.environ.get("PRAISONAI_GATEWAY_MAX_INBOUND") or 0)
         except ValueError:
             self._max_inbound = 0
+        # Outbound events carry channel_id but not channel_type; learn it inbound.
+        self._channel_types: dict[str, str] = {}
 
     @property
     def info(self) -> PluginInfo:
@@ -68,6 +70,11 @@ class GatewayGuardrailPlugin(Plugin):
     def before_message(self, message: dict[str, Any]) -> PluginDecision | None:
         sender = str(message.get("sender_id") or "").lower()
         content = str(message.get("content") or "")
+        channel_id, channel_type = message.get("channel_id"), message.get("channel_type")
+        if channel_id and channel_type:
+            if len(self._channel_types) >= 4096:
+                self._channel_types.clear()
+            self._channel_types[str(channel_id)] = str(channel_type).lower()
         reason = None
         if sender and sender in self._denied_senders:
             reason = "sender not permitted on this channel"
@@ -85,7 +92,10 @@ class GatewayGuardrailPlugin(Plugin):
         if not isinstance(content, str) or not content:
             return message
         patterns = _BASE_PATTERNS
-        if str(message.get("channel_type") or "").lower() in _PUBLIC_CHANNEL_TYPES:
+        channel_type = message.get("channel_type") or self._channel_types.get(
+            str(message.get("channel_id") or ""), ""
+        )
+        if str(channel_type).lower() in _PUBLIC_CHANNEL_TYPES:
             patterns += _PUBLIC_PATTERNS
         redacted = content
         for pattern in patterns:
