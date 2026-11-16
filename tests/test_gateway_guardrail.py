@@ -8,8 +8,8 @@ redaction (``after_message``) including the per-channel policy, and the
 import importlib
 
 import pytest
-
 from praisonaiagents.plugins.plugin import PluginDecision, PluginType
+
 from praisonai_plugins.policies.gateway_guardrail import GatewayGuardrailPlugin
 
 
