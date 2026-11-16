@@ -17,7 +17,7 @@ class BoxdSandbox:
         self.config = config or SandboxConfig(sandbox_type="boxd")
         self._api_key = api_key or os.environ.get("BOXD_API_KEY", "")
         self.machine_id: str | None = None
-        self._lock = threading.Lock()  # start() and stop() may run on different threads
+        self._lock, self._users = threading.Lock(), 0  # start() and stop() may run on different threads
 
     @property
     def is_available(self) -> bool:
@@ -44,19 +44,20 @@ class BoxdSandbox:
             self.machine_id = machine.id
             return True
 
-    def _stop(self) -> None:
+    def _stop(self, keep_shared: bool = False) -> None:
         with self._lock:
-            if self.machine_id is not None:
+            if self.machine_id is not None and not (keep_shared and self._users > 1):
                 self._client.machines.delete(self.machine_id)
-                self.machine_id = None
+                self.machine_id, self._users = None, 0
 
     async def start(self) -> None:
+        self._users += 1  # counts every caller of this machine, so a cancelled start() keeps a shared one
         task = asyncio.ensure_future(asyncio.to_thread(self._start))
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:  # the thread still runs: wait, then delete what it created
             if await asyncio.gather(task, return_exceptions=True) == [True]:
-                await asyncio.to_thread(self._stop)
+                await asyncio.to_thread(self._stop, True)
             raise
 
     async def stop(self) -> None:

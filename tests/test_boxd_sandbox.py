@@ -299,3 +299,29 @@ class TestCancelledStart:
             await start
         client.machines.delete.assert_not_called()
         assert sandbox.machine_id == "m-123"
+
+    async def test_cancelled_start_keeps_a_machine_another_caller_waits_for(self, client):
+        sandbox = _sandbox()
+        creating, release = threading.Event(), threading.Event()
+
+        def slow_create(*args, **kwargs):
+            creating.set()
+            release.wait(5)
+            return SimpleNamespace(id="m-123")
+
+        client.machines.create.side_effect = slow_create
+        first = asyncio.create_task(sandbox.start())
+        await asyncio.to_thread(creating.wait, 5)
+        second = asyncio.create_task(sandbox.run_command("echo boxd-ok"))
+        await asyncio.sleep(0.05)
+        first.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        result = await second
+        assert result.status == SandboxStatus.COMPLETED
+        assert result.stdout == "boxd-ok\n"
+        client.machines.create.assert_called_once()
+        client.machines.delete.assert_not_called()
+        assert sandbox.machine_id == "m-123"
