@@ -118,7 +118,9 @@ result = manager.run_code("print('hello')", language="python")
 | Entry point group | Purpose | Example |
 |-------------------|---------|---------|
 | `praisonai.plugins` | Lifecycle hooks, guardrails, policies | `simple_logger`, `pii_guardrail` |
-| `praisonai.sandbox` | Optional sandbox backends | `capsule` |
+| `praisonai.sandbox` | Optional sandbox backends | `capsule`, `kosa8` |
+
+Some backends ship as their own package and register the same group. **kosa8** runs code in a [kosa8 Cloud](https://kosa8.com/?ref=PraisonAI-Plugins) microVM, with all egress blocked unless `network_enabled=True`: `pip install praisonai-plugins[kosa8]`, set `KOSA8_API_KEY`, then use `SandboxConfig(sandbox_type="kosa8")` or `tools_run_on="kosa8"`.
 
 ---
 
