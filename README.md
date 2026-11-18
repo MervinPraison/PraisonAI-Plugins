@@ -120,6 +120,8 @@ result = manager.run_code("print('hello')", language="python")
 | `praisonai.plugins` | Lifecycle hooks, guardrails, policies | `simple_logger`, `pii_guardrail` |
 | `praisonai.sandbox` | Optional sandbox backends | `capsule` |
 
+**boxd** runs Python and bash in a [boxd](https://boxd.sh?ref=PraisonAI-Plugins) machine, a full Ubuntu VM: `pip install "praisonai-plugins[boxd]"`, set `BOXD_API_KEY` (and `BOXD_ORG` or `BOXD_REGION` if you need them), then use `SandboxConfig(sandbox_type="boxd")` or `tools_run_on="boxd"`. Each sandbox is one isolated machine, deleted by `stop()`. The machine can't reach the internet unless `ResourceLimits.network_enabled` is True.
+
 ---
 
 ## The PraisonAI Protocol Philosophy
