@@ -325,3 +325,89 @@ class TestCancelledStart:
         client.machines.create.assert_called_once()
         client.machines.delete.assert_not_called()
         assert sandbox.machine_id == "m-123"
+
+    async def test_two_cancelled_starts_delete_the_machine(self, client):
+        sandbox = _sandbox()
+        creating, release = threading.Event(), threading.Event()
+
+        def slow_create(*args, **kwargs):
+            creating.set()
+            release.wait(5)
+            return SimpleNamespace(id="m-123")
+
+        client.machines.create.side_effect = slow_create
+        first = asyncio.create_task(sandbox.start())
+        await asyncio.to_thread(creating.wait, 5)
+        second = asyncio.create_task(sandbox.start())
+        await asyncio.sleep(0.05)
+        first.cancel()
+        second.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        for start in (first, second):
+            with pytest.raises(asyncio.CancelledError):
+                await start
+        client.machines.create.assert_called_once()
+        client.machines.delete.assert_called_once_with("m-123")
+        assert sandbox.machine_id is None
+        assert sandbox._users == 0
+
+    async def test_failed_start_leaves_no_count_and_a_cancelled_retry_cleans_up(self, client):
+        sandbox = _sandbox()
+        client.machines.create.side_effect = RuntimeError("quota")
+        with pytest.raises(RuntimeError, match="quota"):
+            await sandbox.start()
+        assert sandbox._users == 0
+        client.machines.create.side_effect = None
+        await self._cancel_during_create(client, sandbox)
+        client.machines.delete.assert_called_once_with("m-123")
+        assert sandbox.machine_id is None
+        assert sandbox._users == 0
+
+    async def test_start_cancelled_twice_still_deletes_the_machine(self, client):
+        sandbox = _sandbox()
+        creating, release = threading.Event(), threading.Event()
+
+        def slow_create(*args, **kwargs):
+            creating.set()
+            release.wait(5)
+            return SimpleNamespace(id="m-123")
+
+        client.machines.create.side_effect = slow_create
+        start = asyncio.create_task(sandbox.start())
+        await asyncio.to_thread(creating.wait, 5)
+        start.cancel()
+        await asyncio.sleep(0.05)
+        start.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await start
+        release.set()
+        for _ in range(200):
+            if client.machines.delete.called:
+                break
+            await asyncio.sleep(0.01)
+        client.machines.delete.assert_called_once_with("m-123")
+        assert sandbox.machine_id is None
+        assert sandbox._users == 0
+
+    async def test_stop_during_a_cancelled_start_keeps_the_next_callers_machine(self, client):
+        sandbox = _sandbox()
+        client.machines.create.side_effect = [SimpleNamespace(id="m-1"), SimpleNamespace(id="m-2")]
+        creating, release = threading.Event(), threading.Event()
+        client.machines.wait_until_ready.side_effect = lambda *a, **k: (creating.set(), release.wait(5))
+        first = asyncio.create_task(sandbox.start())
+        await asyncio.to_thread(creating.wait, 5)
+        stop = asyncio.create_task(sandbox.stop())
+        await asyncio.sleep(0.05)
+        first.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        await stop
+        result = await sandbox.run_command("echo boxd-ok")
+        assert result.status == SandboxStatus.COMPLETED
+        await asyncio.sleep(0.05)
+        client.machines.delete.assert_called_once_with("m-1")
+        assert sandbox.machine_id == "m-2"
+        assert sandbox._users == 0

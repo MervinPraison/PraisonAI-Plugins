@@ -1,5 +1,3 @@
-"""boxd sandbox backend for PraisonAI. Requires: pip install praisonai-plugins[boxd]"""
-
 import asyncio
 import importlib.util
 import os
@@ -11,13 +9,12 @@ from praisonaiagents.sandbox import SandboxConfig, SandboxResult, SandboxStatus
 
 
 class BoxdSandbox:
-    """Runs code in a boxd machine (an Ubuntu VM). start() creates it, stop() deletes it."""
+    """Runs code in a boxd machine (an Ubuntu VM). start() creates it, stop() deletes it. Needs praisonai-plugins[boxd]."""
 
     def __init__(self, config: SandboxConfig | None = None, api_key: str | None = None):
         self.config = config or SandboxConfig(sandbox_type="boxd")
         self._api_key = api_key or os.environ.get("BOXD_API_KEY", "")
-        self.machine_id: str | None = None
-        self._lock, self._users = threading.Lock(), 0  # start() and stop() may run on different threads
+        self.machine_id, self._lock, self._users, self._used = None, threading.Lock(), 0, False  # see start()
 
     @property
     def is_available(self) -> bool:
@@ -29,36 +26,39 @@ class BoxdSandbox:
                 return False
             if not self.is_available:
                 raise RuntimeError("boxd needs BOXD_API_KEY and: pip install praisonai-plugins[boxd]")
-            from boxd import Boxd
-            self._client = Boxd(api_key=self._api_key)
+            self._client = importlib.import_module("boxd").Boxd(api_key=self._api_key)
             machine = self._client.machines.create(
                 f"praisonai-{os.urandom(4).hex()}", org=os.environ.get("BOXD_ORG"),
                 spec={"isolated": True, "egress": [] if self.config.resource_limits.network_enabled else ["none"]},
-                delete_after=86400,  # boxd deletes the machine after a day if stop() never runs
-            )
+                delete_after=86400)  # boxd deletes the machine after a day if stop() never runs
             try:
                 self._client.machines.wait_until_ready(machine.id)
             except BaseException:
                 self._client.machines.delete(machine.id)
                 raise
-            self.machine_id = machine.id
+            self.machine_id, self._used = machine.id, False
             return True
 
-    def _stop(self, keep_shared: bool = False) -> None:
+    def _stop(self, leaving: bool = False) -> None:  # leaving: delete only a machine no caller has or waits for
         with self._lock:
-            if self.machine_id is not None and not (keep_shared and self._users > 1):
+            if self.machine_id is not None and not (leaving and (self._users or self._used)):
                 self._client.machines.delete(self.machine_id)
-                self.machine_id, self._users = None, 0
+                self.machine_id, self._used = None, False
 
     async def start(self) -> None:
-        self._users += 1  # counts every caller of this machine, so a cancelled start() keeps a shared one
+        self._users += 1  # callers still in start(); _used: a start() returned this machine to a caller
         task = asyncio.ensure_future(asyncio.to_thread(self._start))
         try:
             await asyncio.shield(task)
-        except asyncio.CancelledError:  # the thread still runs: wait, then delete what it created
-            if await asyncio.gather(task, return_exceptions=True) == [True]:
-                await asyncio.to_thread(self._stop, True)
+        except BaseException:  # failed or cancelled: leave in a task of its own, so a second cancel can't skip it
+            await asyncio.shield(asyncio.ensure_future(self._leave(task)))
             raise
+        self._users, self._used = self._users - 1, True
+
+    async def _leave(self, task) -> None:  # the last caller out deletes a machine no caller has
+        await asyncio.wait({task})  # the thread may still be creating the machine
+        self._users -= 1
+        await asyncio.to_thread(self._stop, True)
 
     async def stop(self) -> None:
         try:
