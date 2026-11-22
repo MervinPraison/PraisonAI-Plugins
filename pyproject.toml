@@ -17,6 +17,8 @@ dependencies = [
 
 [project.optional-dependencies]
 capsule = ["capsule>=0.1.0"]
+# kosa8 Cloud microVMs; the package registers its own praisonai.sandbox entry point.
+kosa8 = ["praisonai-kosa8>=0.1,<0.2"]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
 
 [project.entry-points."praisonai.plugins"]
